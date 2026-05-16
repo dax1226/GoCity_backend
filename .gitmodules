@@ -1,0 +1,3 @@
+[submodule "GoCity_backend"]
+	path = GoCity_backend
+	url = https://github.com/dax1226/GoCity_backend.git
