@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Env / secrets
+.env
+*.json.local
+
+# Never commit Firebase service account credentials
+*firebase-adminsdk*.json
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+gocity.db
+
+# Node (if used in this folder)
+node_modules/
+package-lock.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
