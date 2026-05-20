@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -5,11 +6,17 @@ import enum
 
 from app.core.database import Base
 
+=======
+from sqlalchemy import Column, Integer, String, Enum
+from app.core.database import Base
+import enum
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 
 class UserRole(str, enum.Enum):
     USER = "USER"
     RIDER = "RIDER"
 
+<<<<<<< HEAD
 
 class BookingType(str, enum.Enum):
     RIDE = "RIDE"
@@ -28,12 +35,18 @@ class BookingStatus(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
 
+=======
+class User(Base):
+    __tablename__ = "users"
+    
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     email = Column(String, unique=True, index=True)
     phone = Column(String)
     hashed_password = Column(String)
     role = Column(Enum(UserRole), default=UserRole.USER)
+<<<<<<< HEAD
 
     bookings = relationship(
         "Booking", back_populates="user", cascade="all, delete-orphan"
@@ -79,3 +92,5 @@ class Booking(Base):
 
     user = relationship("User", back_populates="bookings")
     driver = relationship("Driver", back_populates="bookings")
+=======
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1

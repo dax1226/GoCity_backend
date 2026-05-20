@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr
+<<<<<<< HEAD
 from typing import Optional, List
 from datetime import datetime
 
@@ -8,6 +9,11 @@ from app.models import UserRole, BookingType, BookingStatus
 # ─────────────────────────────────────────────
 # User auth
 # ─────────────────────────────────────────────
+=======
+from typing import Optional
+from app.models import UserRole
+
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
@@ -15,23 +21,34 @@ class UserCreate(BaseModel):
     password: str
     role: UserRole = UserRole.USER
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 class UserResponse(BaseModel):
     id: int
     name: str
     email: EmailStr
+<<<<<<< HEAD
     phone: Optional[str] = None
+=======
+    phone: str
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
     role: UserRole
 
     class Config:
         from_attributes = True
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
 
+<<<<<<< HEAD
 
 class LoginRequest(BaseModel):
     email: str
@@ -112,3 +129,8 @@ class DatabaseSnapshot(BaseModel):
     users: List[UserResponse]
     drivers: List[DriverResponse]
     bookings: List[BookingResponse]
+=======
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+>>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
