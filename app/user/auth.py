@@ -2,16 +2,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-import os
 
 from app.core.database import get_db
+from app.core.security import ALGORITHM, SECRET_KEY
 from app.models import User
 
 # This tells FastAPI where the frontend gets its token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/users/login")
-
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
-ALGORITHM = "HS256"
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
