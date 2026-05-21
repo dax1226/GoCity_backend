@@ -1,5 +1,4 @@
 from pydantic import BaseModel, EmailStr
-<<<<<<< HEAD
 from typing import Optional, List
 from datetime import datetime
 
@@ -9,11 +8,6 @@ from app.models import UserRole, BookingType, BookingStatus
 # ─────────────────────────────────────────────
 # User auth
 # ─────────────────────────────────────────────
-=======
-from typing import Optional
-from app.models import UserRole
-
->>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
@@ -21,34 +15,36 @@ class UserCreate(BaseModel):
     password: str
     role: UserRole = UserRole.USER
 
-<<<<<<< HEAD
 
-=======
->>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
 class UserResponse(BaseModel):
     id: int
     name: str
     email: EmailStr
-<<<<<<< HEAD
     phone: Optional[str] = None
-=======
-    phone: str
->>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
     role: UserRole
+    gender: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    member_since: Optional[datetime] = None
+    emergency_contact: Optional[str] = None
 
     class Config:
         from_attributes = True
 
-<<<<<<< HEAD
 
-=======
->>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
+class UserProfileUpdate(BaseModel):
+    """Partial update — only non-None fields are written."""
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    emergency_contact: Optional[str] = None
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
 
-<<<<<<< HEAD
 
 class LoginRequest(BaseModel):
     email: str
@@ -66,6 +62,8 @@ class DriverResponse(BaseModel):
     vehicle_number: str
     rating: float
     status: str
+    current_lat: Optional[float] = None
+    current_lng: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -80,6 +78,11 @@ class RideBookingCreate(BaseModel):
     vehicle_type: str
     fare: float = 0.0
     payment_method: str = "wallet"
+    # PostGIS coordinates (optional; backend can geocode later if missing)
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    drop_lat: Optional[float] = None
+    drop_lng: Optional[float] = None
 
 
 class CabBookingCreate(BaseModel):
@@ -88,6 +91,10 @@ class CabBookingCreate(BaseModel):
     vehicle_type: str
     fare: float = 0.0
     payment_method: str = "wallet"
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    drop_lat: Optional[float] = None
+    drop_lng: Optional[float] = None
 
 
 class ParcelBookingCreate(BaseModel):
@@ -99,6 +106,10 @@ class ParcelBookingCreate(BaseModel):
     parcel_size: str
     fare: float = 0.0
     payment_method: str = "wallet"
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    drop_lat: Optional[float] = None
+    drop_lng: Optional[float] = None
 
 
 # ─────────────────────────────────────────────
@@ -109,6 +120,10 @@ class BookingResponse(BaseModel):
     booking_type: BookingType
     pickup_location: str
     drop_location: str
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    drop_lat: Optional[float] = None
+    drop_lng: Optional[float] = None
     vehicle_type: Optional[str] = None
     fare: float
     status: BookingStatus
@@ -129,8 +144,56 @@ class DatabaseSnapshot(BaseModel):
     users: List[UserResponse]
     drivers: List[DriverResponse]
     bookings: List[BookingResponse]
-=======
-class LoginRequest(BaseModel):
-    email: str
-    password: str
->>>>>>> 07f3a484d2d45324f75a9dd31819171e9e2f1ff1
+
+
+# ─────────────────────────────────────────────
+# Notifications
+# ─────────────────────────────────────────────
+class NotificationResponse(BaseModel):
+    id: int
+    user_id: int
+    booking_id: Optional[int] = None
+    type: str
+    title: str
+    message: str
+    is_read: int
+    driver_lat: Optional[float] = None
+    driver_lng: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationCreate(BaseModel):
+    """Used internally or by driver panel in the future."""
+    booking_id: Optional[int] = None
+    type: str = "GENERAL"
+    title: str
+    message: str
+    driver_lat: Optional[float] = None
+    driver_lng: Optional[float] = None
+
+
+# ─── Saved Places ────────────────────────────
+class SavedPlaceCreate(BaseModel):
+    label: str
+    address: str
+    icon: Optional[str] = "location"
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
+class SavedPlaceResponse(BaseModel):
+    id: int
+    user_id: int
+    label: str
+    address: str
+    icon: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
