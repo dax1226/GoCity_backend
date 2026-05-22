@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.user.routes import router as user_router
-from app.booking.routes import router as booking_router
-from app.notification.routes import router as notification_router
-from app.saved_place.routes import router as saved_place_router
-from app.payment.routes import router as payment_router
+from app.user.router import router as user_router
+from app.booking.router import router as booking_router
+from app.notification.router import router as notification_router
+from app.saved_place.router import router as saved_place_router
+from app.payment.router import router as payment_router
 from app.core.database import engine, Base
 
-# Make sure all models are imported before create_all
+# Importing the models package side-effect-registers every table on
+# Base.metadata so create_all picks them up.
 from app import models  # noqa: F401
 
 # Create tables
