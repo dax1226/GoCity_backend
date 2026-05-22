@@ -1,0 +1,46 @@
+"""User-domain service helpers.
+
+Currently exposes the `get_current_user` FastAPI dependency used by every
+authenticated route across the app (booking, notification, saved_place,
+payment, ...). Kept here rather than under app/core/ because it's bound to
+the User ORM and to the user-domain login flow that mints the tokens.
+
+Migrated from app/user/auth.py during the folder restructure.
+"""
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.security import ALGORITHM, SECRET_KEY
+from app.models.user import User
+
+# This tells FastAPI where the frontend gets its token
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/users/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        # Decode the JWT token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # We stored the user's ID in the "sub" field in router.py
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+
+    except JWTError:
+        raise credentials_exception
+
+    # Fetch the actual user from the database
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if user is None:
+        raise credentials_exception
+
+    return user

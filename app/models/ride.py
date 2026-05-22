@@ -1,0 +1,51 @@
+"""Ride / booking ORM model.
+
+Geo columns are plain Float (lat, lng) so the app runs on both SQLite and
+PostgreSQL without changes. For production on Postgres you can layer a
+PostGIS GEOGRAPHY column on top via Alembic — see database/schema.sql for
+the target schema.
+
+The single Booking table backs three booking surfaces (RIDE / CAB / PARCEL)
+distinguished by the booking_type enum.
+"""
+
+from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from app.core.database import Base
+from app.enums.ride_status import BookingType, BookingStatus
+
+
+class Booking(Base):
+    __tablename__ = "bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True)
+
+    booking_type = Column(Enum(BookingType), nullable=False)
+    pickup_location = Column(String, nullable=False)
+    drop_location = Column(String, nullable=False)
+
+    # Coordinates (degrees, WGS84). Distance queries use Haversine.
+    pickup_lat = Column(Float, nullable=True)
+    pickup_lng = Column(Float, nullable=True)
+    drop_lat = Column(Float, nullable=True)
+    drop_lng = Column(Float, nullable=True)
+
+    vehicle_type = Column(String, nullable=True)
+    fare = Column(Float, default=0.0)
+    status = Column(Enum(BookingStatus), default=BookingStatus.PENDING)
+    payment_method = Column(String, default="wallet")
+
+    # Parcel-only fields
+    sender_name = Column(String, nullable=True)
+    receiver_name = Column(String, nullable=True)
+    receiver_phone = Column(String, nullable=True)
+    parcel_size = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="bookings")
+    driver = relationship("Driver", back_populates="bookings")
