@@ -7,11 +7,12 @@ flat surface. New code should prefer the explicit submodules
 """
 
 from app.schemas.user_schema import (  # noqa: F401
-    UserCreate,
+    PhoneRequest,
+    OTPVerifyRequest,
+    ProfileSetupRequest,
     UserResponse,
     UserProfileUpdate,
     Token,
-    LoginRequest,
     SavedPlaceCreate,
     SavedPlaceResponse,
 )

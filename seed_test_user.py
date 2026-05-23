@@ -1,20 +1,18 @@
-"""
-One-shot seed: inserts a known test user so you can log in immediately.
+"""One-shot seed: inserts a known test user so you can verify OTP immediately.
 
 Run from the GoCity_backend directory:
     python seed_test_user.py
 
 Credentials it creates:
-    email:    test@gocity.in
-    password: test1234
+    phone:    +919999999999
+    OTP:      123456 (dev master code)
 
 Safe to re-run — it won't duplicate if the user already exists.
 """
 
 from app.core.database import SessionLocal, engine, Base
 from app import models  # noqa: F401 — ensures tables are registered before create_all
-from app.models import User, UserRole
-from app.core.security import get_password_hash
+from app.models.user import User, UserRole
 
 
 def main() -> None:
@@ -23,26 +21,25 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        email = "test@gocity.in"
-        existing = db.query(User).filter(User.email == email).first()
+        phone = "+919999999999"
+        existing = db.query(User).filter(User.phone == phone).first()
         if existing:
-            print(f"User {email!r} already exists (id={existing.id}). Nothing to do.")
+            print(f"User with phone {phone!r} already exists (id={existing.id}). Nothing to do.")
             return
 
         user = User(
             name="Test User",
-            email=email,
-            phone="9999999999",
-            hashed_password=get_password_hash("test1234"),
+            email="test@gocity.in",
+            phone=phone,
             role=UserRole.USER,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-        print(f"Created user id={user.id} email={user.email}")
+        print(f"Created user id={user.id} phone={user.phone}")
         print("Login with:")
-        print("  email:    test@gocity.in")
-        print("  password: test1234")
+        print("  phone:    +919999999999")
+        print("  OTP code: 123456 (dev master code)")
     finally:
         db.close()
 
