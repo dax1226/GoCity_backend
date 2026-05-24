@@ -8,9 +8,9 @@ startup error than silently signing tokens with a public default.
 import os
 from datetime import datetime, timedelta, timezone
 
-import bcrypt
 from dotenv import load_dotenv
 from jose import jwt
+
 
 load_dotenv()
 
@@ -25,21 +25,6 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
-# bcrypt only hashes the first 72 bytes of input — truncate to be explicit.
-_BCRYPT_MAX = 72
-
-
-def get_password_hash(password: str) -> str:
-    pw_bytes = password.encode("utf-8")[:_BCRYPT_MAX]
-    return bcrypt.hashpw(pw_bytes, bcrypt.gensalt()).decode("utf-8")
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    pw_bytes = plain_password.encode("utf-8")[:_BCRYPT_MAX]
-    try:
-        return bcrypt.checkpw(pw_bytes, hashed_password.encode("utf-8"))
-    except (ValueError, TypeError):
-        return False
 
 
 def create_access_token(data: dict) -> str:

@@ -10,19 +10,25 @@ from app.models.user import UserRole
 # ─────────────────────────────────────────────
 # User auth
 # ─────────────────────────────────────────────
-class UserCreate(BaseModel):
-    name: str
-    email: EmailStr
+class PhoneRequest(BaseModel):
     phone: str
-    password: str
-    role: UserRole = UserRole.USER
+
+
+class OTPVerifyRequest(BaseModel):
+    phone: str
+    otp: str
+
+
+class ProfileSetupRequest(BaseModel):
+    name: str
+    role: UserRole
 
 
 class UserResponse(BaseModel):
     id: int
-    name: str
-    email: EmailStr
-    phone: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: str
     role: UserRole
     gender: Optional[str] = None
     date_of_birth: Optional[str] = None
@@ -46,11 +52,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
+    is_new_user: bool = False
 
 
 # ─── Saved Places ────────────────────────────

@@ -25,10 +25,10 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String)
-    email = Column(String, unique=True, index=True)
-    phone = Column(String)
-    hashed_password = Column(String)
+    name = Column(String, nullable=True)
+    email = Column(String, index=True, nullable=True)
+    phone = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
 
     # Profile fields
