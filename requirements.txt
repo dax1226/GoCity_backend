@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+firebase-admin
+sqlalchemy
+psycopg2-binary
+geoalchemy2
+email-validator
+alembic
+bcrypt
+python-jose[cryptography]
+# Optional — only needed when going live with Razorpay (see app/payment/routes.py).
+# The payment endpoints fall back to stub responses if this is not installed.
+razorpay
+twilio
+
