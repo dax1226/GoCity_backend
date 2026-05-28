@@ -29,3 +29,6 @@ package-lock.json
 .DS_Store
 Thumbs.db
 .env
+__pycache__/
+*.pyc
+gocity.db
