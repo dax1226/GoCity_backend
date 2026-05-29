@@ -6,6 +6,7 @@ from app.booking.router import router as booking_router
 from app.notification.router import router as notification_router
 from app.saved_place.router import router as saved_place_router
 from app.payment.router import router as payment_router
+from app.driver.router import router as driver_router
 from app.core.database import engine, Base
 
 # Importing the models package side-effect-registers every table on
@@ -34,6 +35,7 @@ app.include_router(booking_router, prefix="/api/bookings", tags=["bookings"])
 app.include_router(notification_router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(saved_place_router, prefix="/api/saved-places", tags=["saved-places"])
 app.include_router(payment_router, prefix="/api/payment", tags=["payment"])
+app.include_router(driver_router, prefix="/api/driver", tags=["driver"])
 
 
 @app.get("/")
