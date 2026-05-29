@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.user.service import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.driver import Driver
 from app.models.ride import Booking
 from app.enums.ride_status import BookingType, BookingStatus
@@ -180,11 +180,9 @@ def create_ride_booking(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    driver = _pick_driver(db, payload.vehicle_type, payload.pickup_lat, payload.pickup_lng)
-
     booking = Booking(
         user_id=current_user.id,
-        driver_id=driver.id if driver else None,
+        driver_id=None,
         booking_type=BookingType.RIDE,
         pickup_location=payload.pickup_location,
         drop_location=payload.drop_location,
@@ -194,10 +192,9 @@ def create_ride_booking(
         drop_lng=payload.drop_lng,
         vehicle_type=payload.vehicle_type,
         fare=payload.fare,
-        status=BookingStatus.ACCEPTED if driver else BookingStatus.PENDING,
+        status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
     )
-    _assign_driver_to_booking(db, driver)
     db.add(booking)
     db.commit()
     db.refresh(booking)
@@ -210,11 +207,9 @@ def create_cab_booking(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    driver = _pick_driver(db, payload.vehicle_type, payload.pickup_lat, payload.pickup_lng)
-
     booking = Booking(
         user_id=current_user.id,
-        driver_id=driver.id if driver else None,
+        driver_id=None,
         booking_type=BookingType.CAB,
         pickup_location=payload.pickup_location,
         drop_location=payload.drop_location,
@@ -224,10 +219,9 @@ def create_cab_booking(
         drop_lng=payload.drop_lng,
         vehicle_type=payload.vehicle_type,
         fare=payload.fare,
-        status=BookingStatus.ACCEPTED if driver else BookingStatus.PENDING,
+        status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
     )
-    _assign_driver_to_booking(db, driver)
     db.add(booking)
     db.commit()
     db.refresh(booking)
@@ -240,11 +234,9 @@ def create_parcel_booking(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    driver = _pick_driver(db, "bike", payload.pickup_lat, payload.pickup_lng)
-
     booking = Booking(
         user_id=current_user.id,
-        driver_id=driver.id if driver else None,
+        driver_id=None,
         booking_type=BookingType.PARCEL,
         pickup_location=payload.pickup_location,
         drop_location=payload.drop_location,
@@ -254,14 +246,13 @@ def create_parcel_booking(
         drop_lng=payload.drop_lng,
         vehicle_type="parcel-bike",
         fare=payload.fare,
-        status=BookingStatus.ACCEPTED if driver else BookingStatus.PENDING,
+        status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
         sender_name=payload.sender_name,
         receiver_name=payload.receiver_name,
         receiver_phone=payload.receiver_phone,
         parcel_size=payload.parcel_size,
     )
-    _assign_driver_to_booking(db, driver)
     db.add(booking)
     db.commit()
     db.refresh(booking)
@@ -298,9 +289,12 @@ def nearest_drivers(
     Haversine distance. Works on SQLite and Postgres alike."""
     _ensure_seed_drivers(db)
 
+    # Join with User table to select only real users registered with RIDER role
     online = (
         db.query(Driver)
+        .join(User, Driver.phone == User.phone)
         .filter(
+            User.role == UserRole.RIDER,
             Driver.status == "online",
             Driver.current_lat.isnot(None),
             Driver.current_lng.isnot(None),
