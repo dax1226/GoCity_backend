@@ -9,7 +9,7 @@ The single Booking table backs three booking surfaces (RIDE / CAB / PARCEL)
 distinguished by the booking_type enum.
 """
 
-from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -46,6 +46,16 @@ class Booking(Base):
     parcel_size = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Live driver location (updated by driver during ACCEPTED / ONGOING)
+    driver_lat = Column(Float, nullable=True)
+    driver_lng = Column(Float, nullable=True)
+    driver_loc_updated_at = Column(DateTime, nullable=True)
+
+    # OTP for trip start verification
+    ride_otp = Column(String(6), nullable=True)
+    otp_verified = Column(Boolean, default=False)
+    started_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="bookings")
     driver = relationship("Driver", back_populates="bookings")

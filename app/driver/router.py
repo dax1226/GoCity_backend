@@ -30,6 +30,18 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 
 # ─── DTO Helpers ─────────────────────────────────────────────────────────────
 def _to_booking_response(b: Booking, d: Driver):
+    driver_location = None
+    if (
+        b.driver_lat is not None
+        and b.driver_lng is not None
+        and b.driver_loc_updated_at is not None
+    ):
+        driver_location = {
+            "lat": b.driver_lat,
+            "lng": b.driver_lng,
+            "updated_at": b.driver_loc_updated_at.isoformat(),
+        }
+
     return {
         "id": b.id,
         "booking_type": b.booking_type,
@@ -64,7 +76,11 @@ def _to_booking_response(b: Booking, d: Driver):
             "status": d.status,
             "current_lat": d.current_lat,
             "current_lng": d.current_lng,
-        } if d else None
+        } if d else None,
+        "driver_location": driver_location,
+        "ride_otp": b.ride_otp,
+        "otp_verified": b.otp_verified,
+        "started_at": b.started_at.isoformat() if b.started_at else None,
     }
 
 
@@ -246,8 +262,13 @@ def start_ride(
     booking = db.query(Booking).filter(Booking.id == booking_id, Booking.driver_id == driver.id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found or not assigned to you")
-        
+
+    if not booking.otp_verified:
+        raise HTTPException(status_code=400, detail="OTP not verified. Use /verify-otp first.")
+
     booking.status = BookingStatus.ONGOING
+    if booking.started_at is None:
+        booking.started_at = datetime.utcnow()
     db.commit()
     db.refresh(booking)
     return _to_booking_response(booking, driver)
@@ -377,6 +398,92 @@ def update_location(
     driver.current_lng = payload.lng
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/rides/{ride_id}/update-location")
+def update_ride_location(
+    ride_id: int,
+    payload: UpdateLocationPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update driver location for a specific active ride.
+
+    Writes to both the Driver row (so /bookings/me returns fresh
+    driver.current_lat/lng for backward compat) and the Booking row
+    (so driver_location is available in the BookingResponse).
+    """
+    if current_user.role != UserRole.RIDER:
+        raise HTTPException(status_code=403, detail="User is not a rider/driver")
+
+    driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+
+    booking = db.query(Booking).filter(
+        Booking.id == ride_id,
+        Booking.driver_id == driver.id,
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found or not assigned to you")
+
+    if booking.status not in (BookingStatus.ACCEPTED, BookingStatus.ONGOING):
+        raise HTTPException(status_code=400, detail="Ride is not active")
+
+    # Update the Driver row (backward compat — tracking.tsx reads driver.current_lat/lng)
+    driver.current_lat = payload.lat
+    driver.current_lng = payload.lng
+
+    # Update the Booking row (new — driver_location in BookingResponse)
+    booking.driver_lat = payload.lat
+    booking.driver_lng = payload.lng
+    booking.driver_loc_updated_at = datetime.utcnow()
+
+    db.commit()
+    return {"ok": True}
+
+
+class VerifyOtpPayload(BaseModel):
+    otp: str
+
+@router.post("/rides/{ride_id}/verify-otp")
+def verify_ride_otp(
+    ride_id: int,
+    payload: VerifyOtpPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Verify OTP to start a ride. OTP was generated at booking creation
+    and shown to the user. Driver enters it to confirm pickup."""
+    if current_user.role != UserRole.RIDER:
+        raise HTTPException(status_code=403, detail="User is not a rider/driver")
+
+    driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+
+    booking = db.query(Booking).options(joinedload(Booking.user)).filter(
+        Booking.id == ride_id,
+        Booking.driver_id == driver.id,
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found or not assigned to you")
+
+    if booking.status != BookingStatus.ACCEPTED:
+        raise HTTPException(status_code=400, detail="Ride is not in ACCEPTED state")
+
+    if not booking.ride_otp:
+        raise HTTPException(status_code=400, detail="Ride OTP is missing")
+
+    if payload.otp.strip() != booking.ride_otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    booking.otp_verified = True
+    booking.status = BookingStatus.ONGOING
+    booking.started_at = datetime.utcnow()
+    db.commit()
+    db.refresh(booking)
+    return _to_booking_response(booking, driver)
 
 
 @router.get("/earnings/summary")
