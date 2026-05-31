@@ -74,6 +74,15 @@ class ParcelBookingCreate(BaseModel):
 
 
 # ─────────────────────────────────────────────
+# Driver live location (embedded in BookingResponse)
+# ─────────────────────────────────────────────
+class DriverLocationResponse(BaseModel):
+    lat: float
+    lng: float
+    updated_at: datetime
+
+
+# ─────────────────────────────────────────────
 # Booking response (used by /bookings & /database)
 # ─────────────────────────────────────────────
 class BookingResponse(BaseModel):
@@ -96,6 +105,10 @@ class BookingResponse(BaseModel):
     created_at: datetime
     user: UserResponse
     driver: Optional[DriverResponse] = None
+    driver_location: Optional[DriverLocationResponse] = None
+    ride_otp: Optional[str] = None
+    otp_verified: Optional[bool] = None
+    started_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

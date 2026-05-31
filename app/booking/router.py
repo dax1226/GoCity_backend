@@ -39,8 +39,10 @@ from app.schemas.ride_schema import (
     ParcelBookingCreate,
     BookingResponse,
     DriverResponse,
+    DriverLocationResponse,
     DatabaseSnapshot,
 )
+from app.services.otp import generate_otp
 
 
 router = APIRouter()
@@ -148,6 +150,17 @@ def _driver_dto(d: Driver) -> DriverResponse:
 
 
 def _to_response(booking: Booking) -> BookingResponse:
+    driver_location = None
+    if (
+        booking.driver_lat is not None
+        and booking.driver_lng is not None
+        and booking.driver_loc_updated_at is not None
+    ):
+        driver_location = DriverLocationResponse(
+            lat=booking.driver_lat,
+            lng=booking.driver_lng,
+            updated_at=booking.driver_loc_updated_at,
+        )
     return BookingResponse(
         id=booking.id,
         booking_type=booking.booking_type,
@@ -168,6 +181,10 @@ def _to_response(booking: Booking) -> BookingResponse:
         created_at=booking.created_at,
         user=booking.user,
         driver=_driver_dto(booking.driver) if booking.driver else None,
+        driver_location=driver_location,
+        ride_otp=booking.ride_otp,
+        otp_verified=booking.otp_verified,
+        started_at=booking.started_at,
     )
 
 
@@ -194,6 +211,7 @@ def create_ride_booking(
         fare=payload.fare,
         status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
+        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()
@@ -221,6 +239,7 @@ def create_cab_booking(
         fare=payload.fare,
         status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
+        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()
@@ -252,6 +271,7 @@ def create_parcel_booking(
         receiver_name=payload.receiver_name,
         receiver_phone=payload.receiver_phone,
         parcel_size=payload.parcel_size,
+        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()

@@ -1,34 +1,75 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Defaults to local PostgreSQL. Override via DATABASE_URL in .env.
-#   Postgres:  postgresql://postgres:password@localhost:5432/gocity
-#   SQLite (dev only):  sqlite:///./gocity.db
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:password@localhost:5432/gocity",
-)
+DEFAULT_SQLITE_URL = "sqlite:///./gocity.db"
 
-# SQLite needs check_same_thread=False; Postgres does not.
-connect_args = (
-    {"check_same_thread": False}
-    if SQLALCHEMY_DATABASE_URL.startswith("sqlite")
-    else {}
-)
+def _clean_url(value: str | None, fallback: str) -> str:
+    if not value:
+        return fallback
+    stripped = value.strip()
+    if (
+        (stripped.startswith('"') and stripped.endswith('"'))
+        or (stripped.startswith("'") and stripped.endswith("'"))
+    ):
+        stripped = stripped[1:-1].strip()
+    return stripped or fallback
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args=connect_args,
-    pool_pre_ping=True,  # auto-reconnect dropped Postgres connections
-)
 
+def _connect_args(url: str) -> dict:
+    if url.startswith("sqlite"):
+        return {"check_same_thread": False}
+    if url.startswith("postgresql"):
+        # Keep startup failures quick when remote DB is down/unreachable.
+        return {"connect_timeout": 5}
+    return {}
+
+
+def _build_engine(url: str):
+    return create_engine(
+        url,
+        connect_args=_connect_args(url),
+        pool_pre_ping=True,  # auto-reconnect dropped DB connections
+    )
+
+
+def _can_connect(test_engine) -> bool:
+    try:
+        with test_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except SQLAlchemyError:
+        return False
+
+
+configured_database_url = _clean_url(os.getenv("DATABASE_URL"), DEFAULT_SQLITE_URL)
+fallback_database_url = _clean_url(os.getenv("DATABASE_FALLBACK_URL"), DEFAULT_SQLITE_URL)
+
+active_database_url = configured_database_url
+engine = _build_engine(active_database_url)
+
+if active_database_url.startswith("postgresql") and not _can_connect(engine):
+    print(
+        "[DB] Could not connect to configured Postgres DB. "
+        f"Falling back to {fallback_database_url}."
+    )
+    active_database_url = fallback_database_url
+    engine = _build_engine(active_database_url)
+
+    if active_database_url.startswith("postgresql") and not _can_connect(engine):
+        print(
+            "[DB] Fallback Postgres is also unreachable. "
+            f"Using local SQLite at {DEFAULT_SQLITE_URL}."
+        )
+        active_database_url = DEFAULT_SQLITE_URL
+        engine = _build_engine(active_database_url)
 
 # Auto-enable PostGIS on Postgres connections (no-op for SQLite).
-if SQLALCHEMY_DATABASE_URL.startswith("postgres"):
+if active_database_url.startswith("postgres"):
     @event.listens_for(engine, "connect")
     def _ensure_postgis(dbapi_connection, _connection_record):
         try:
