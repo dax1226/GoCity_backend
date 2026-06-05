@@ -21,6 +21,7 @@ class Driver(Base):
     vehicle_number = Column(String, unique=True, nullable=False)
     rating = Column(Float, default=5.0)
     status = Column(String, default="online")
+    profile_image = Column(String, nullable=True)     # Cloudinary URL
 
     # Last known driver location (degrees, WGS84)
     current_lat = Column(Float, nullable=True)

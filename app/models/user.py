@@ -36,6 +36,7 @@ class User(Base):
     date_of_birth = Column(String, nullable=True)     # ISO date string "YYYY-MM-DD"
     member_since = Column(DateTime, default=datetime.utcnow)
     emergency_contact = Column(String, nullable=True)
+    profile_image = Column(String, nullable=True)     # Cloudinary URL
 
     bookings = relationship(
         "Booking", back_populates="user", cascade="all, delete-orphan"

@@ -15,4 +15,5 @@ python-jose[cryptography]
 # The payment endpoints fall back to stub responses if this is not installed.
 razorpay
 twilio
-
+cloudinary
+python-multipart

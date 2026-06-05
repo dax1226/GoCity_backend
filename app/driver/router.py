@@ -3,7 +3,7 @@ import random
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 
@@ -13,6 +13,7 @@ from app.models.user import User, UserRole
 from app.models.driver import Driver
 from app.models.ride import Booking
 from app.enums.ride_status import BookingType, BookingStatus
+from app.utils.cloudinary_upload import upload_image
 
 router = APIRouter()
 
@@ -124,9 +125,36 @@ def get_driver_profile(
         "status": driver.status,
         "total_rides": len(driver.bookings),
         "member_since": current_user.member_since.isoformat() if current_user.member_since else datetime.utcnow().isoformat(),
-        "profile_image": None,
+        "profile_image": driver.profile_image,
         "documents_verified": True
     }
+
+
+@router.post("/me/profile-image")
+def upload_driver_profile_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != UserRole.RIDER:
+        raise HTTPException(status_code=403, detail="User is not a rider/driver")
+        
+    driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+        
+    contents = file.file.read()
+    url = upload_image(contents, folder="gocity/drivers")
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to upload image to Cloudinary")
+        
+    driver.profile_image = url
+    current_user.profile_image = url
+    db.commit()
+    db.refresh(driver)
+    db.refresh(current_user)
+    
+    return {"status": "ok", "profile_image": url}
 
 
 class GoOnlinePayload(BaseModel):
