@@ -34,6 +34,7 @@ class UserResponse(BaseModel):
     date_of_birth: Optional[str] = None
     member_since: Optional[datetime] = None
     emergency_contact: Optional[str] = None
+    profile_image: Optional[str] = None
 
     class Config:
         from_attributes = True
