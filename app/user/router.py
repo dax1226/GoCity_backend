@@ -14,17 +14,71 @@ from app.schemas import (
     Token,
 )
 from app.services.otp import generate_otp, send_otp, verify_otp
+import re
+from datetime import date, datetime
 
 router = APIRouter()
+
+
+def _serialize_user(user: User) -> dict:
+    """Return a JSON-serializable dict for a User suitable for response models.
+
+    Ensures date/time fields are ISO strings so FastAPI/Pydantic validation passes.
+    """
+    user_dict = {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "gender": user.gender,
+        "date_of_birth": None,
+        "member_since": None,
+        "emergency_contact": user.emergency_contact,
+    }
+
+    if getattr(user, "date_of_birth", None) is not None:
+        dob = user.date_of_birth
+        if isinstance(dob, date):
+            user_dict["date_of_birth"] = dob.isoformat()
+        else:
+            user_dict["date_of_birth"] = str(dob)
+
+    if getattr(user, "member_since", None) is not None:
+        ms = user.member_since
+        if isinstance(ms, datetime):
+            user_dict["member_since"] = ms.isoformat()
+        else:
+            user_dict["member_since"] = str(ms)
+
+    return user_dict
+
+
+def _normalise_phone(raw: str) -> str:
+    """Return E.164 phone (+91XXXXXXXXXX) or raise HTTPException."""
+    phone = re.sub(r"[\s\-\(\)]+", "", raw.strip())
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    # Strip leading + to work with digits only
+    digits = phone[1:] if phone.startswith("+") else phone
+
+    # 91XXXXXXXXXX (12 digits) → strip country code
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+
+    if len(digits) != 10 or not digits.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid phone number. Please enter a 10-digit number (e.g. 9876543210).",
+        )
+    return f"+91{digits}"
 
 
 @router.post("/send-otp")
 def send_otp_endpoint(payload: PhoneRequest):
     """Generate and send an OTP to the user's phone number."""
-    phone = payload.phone.strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="Phone number is required")
-        
+    phone = _normalise_phone(payload.phone)
     otp = generate_otp()
     send_otp(phone, otp)
     return {"message": "OTP sent successfully"}
@@ -33,7 +87,7 @@ def send_otp_endpoint(payload: PhoneRequest):
 @router.post("/verify-otp", response_model=Token)
 def verify_otp_endpoint(payload: OTPVerifyRequest, db: Session = Depends(get_db)):
     """Verify the OTP. Creates a new user if the phone is not registered."""
-    phone = payload.phone.strip()
+    phone = _normalise_phone(payload.phone)
     otp = payload.otp.strip()
     
     if not verify_otp(phone, otp):
@@ -58,7 +112,7 @@ def verify_otp_endpoint(payload: OTPVerifyRequest, db: Session = Depends(get_db)
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": db_user,
+        "user": _serialize_user(db_user),
         "is_new_user": is_new_user,
     }
 
@@ -77,13 +131,13 @@ def setup_profile_endpoint(
     current_user.role = payload.role
     db.commit()
     db.refresh(current_user)
-    return current_user
+    return _serialize_user(current_user)
 
 
 @router.get("/me", response_model=UserResponse)
 def get_profile(current_user: User = Depends(get_current_user)):
     """Return the full profile for the currently logged-in user."""
-    return current_user
+    return _serialize_user(current_user)
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -104,4 +158,4 @@ def update_profile(
 
     db.commit()
     db.refresh(current_user)
-    return current_user
+    return _serialize_user(current_user)
