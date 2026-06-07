@@ -44,6 +44,7 @@ class UserProfileUpdate(BaseModel):
     """Partial update — only non-None fields are written."""
     name: Optional[str] = None
     phone: Optional[str] = None
+    email: Optional[EmailStr] = None
     gender: Optional[str] = None
     date_of_birth: Optional[str] = None
     emergency_contact: Optional[str] = None

@@ -392,3 +392,36 @@ def update_booking_status(
     db.commit()
     db.refresh(booking)
     return _to_response(booking)
+
+
+@router.delete("/{booking_id}", status_code=200)
+def delete_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a booking permanently from the database.
+
+    Only the booking owner can delete. If a driver was assigned,
+    their status is freed back to 'online'.
+    """
+    booking = (
+        db.query(Booking)
+        .options(joinedload(Booking.driver))
+        .filter(Booking.id == booking_id)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your booking")
+
+    # Free the driver back to 'online' so they can take new rides
+    if booking.driver is not None:
+        booking.driver.status = "online"
+        db.commit()
+
+    db.delete(booking)
+    db.commit()
+    return {"ok": True, "deleted_id": booking_id}
