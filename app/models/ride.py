@@ -9,7 +9,7 @@ The single Booking table backs three booking surfaces (RIDE / CAB / PARCEL)
 distinguished by the booking_type enum.
 """
 
-from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -52,10 +52,38 @@ class Booking(Base):
     driver_lng = Column(Float, nullable=True)
     driver_loc_updated_at = Column(DateTime, nullable=True)
 
-    # OTP for trip start verification
+    # OTP for trip start verification.
+    # ride_otp is generated at booking time but only revealed to the passenger
+    # once the driver presses "Start Trip" (otp_released = True). The driver then
+    # enters the OTP the passenger reads back to flip the ride to ONGOING.
     ride_otp = Column(String(6), nullable=True)
+    otp_released = Column(Boolean, default=False)
     otp_verified = Column(Boolean, default=False)
     started_at = Column(DateTime, nullable=True)
 
+    # Pickup workflow (driver panel). arrived_at is set when the driver taps
+    # ARRIVED inside the pickup geofence; the 3-minute wait-charge grace period
+    # is measured from it. pickup_verified records a "Perfect Pick-up" — the
+    # ride was started within the pickup geofence.
+    arrived_at = Column(DateTime, nullable=True)
+    wait_charge_amount = Column(Float, default=0.0)
+    pickup_verified = Column(Boolean, default=False)
+    completed_at = Column(DateTime, nullable=True)
+
     user = relationship("User", back_populates="bookings")
     driver = relationship("Driver", back_populates="bookings")
+
+
+class DriverRideRejection(Base):
+    """A driver dismissed (or cancelled) this booking — never offer it to them
+    again. Other drivers still see the booking in their available list."""
+
+    __tablename__ = "driver_ride_rejections"
+    __table_args__ = (
+        UniqueConstraint("driver_id", "booking_id", name="uq_driver_booking_rejection"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
