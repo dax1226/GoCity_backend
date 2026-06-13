@@ -8,6 +8,7 @@ create_all.
 
 from app.models.user import User, UserRole, SavedPlace  # noqa: F401
 from app.models.driver import Driver  # noqa: F401
-from app.models.ride import Booking  # noqa: F401
+from app.models.ride import Booking, DriverRideRejection  # noqa: F401
 from app.models.tracking import Notification, NotificationType  # noqa: F401
+from app.models.wallet import DriverCustomerRating, DriverWalletTransaction  # noqa: F401
 # app.models.payment is a placeholder — no payment ORM models yet.

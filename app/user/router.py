@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.user.service import get_current_user
+from app.models.driver import Driver
 from app.models.user import User, UserRole
 from app.schemas import (
     PhoneRequest,
@@ -20,7 +21,45 @@ from datetime import date, datetime
 router = APIRouter()
 
 
-def _serialize_user(user: User) -> dict:
+def _driver_document_state(user: User, db: Session | None) -> dict:
+    # TEMP: Strong license verification is skipped for now (OCR API not yet set
+    # up). Report every user as not requiring document verification so the app's
+    # redirect guards send drivers straight to the dashboard instead of looping
+    # back to the Driver Documents screen. Re-enable the real logic below once
+    # OCR verification is ready.
+    return {
+        "documents_verified": True,
+        "document_verification_status": "not_required",
+        "requires_document_verification": False,
+    }
+
+    # --- begin original document-state logic (re-enable later) ---
+    if user.role != UserRole.RIDER:
+        return {
+            "documents_verified": True,
+            "document_verification_status": "not_required",
+            "requires_document_verification": False,
+        }
+
+    driver = None
+    if db is not None:
+        driver = db.query(Driver).filter(Driver.phone == user.phone).first()
+
+    documents_verified = bool(driver and driver.documents_verified)
+    status = (
+        driver.document_verification_status
+        if driver and driver.document_verification_status
+        else "pending"
+    )
+    return {
+        "documents_verified": documents_verified,
+        "document_verification_status": status,
+        "requires_document_verification": not documents_verified,
+    }
+    # --- end original document-state logic ---
+
+
+def _serialize_user(user: User, db: Session | None = None) -> dict:
     """Return a JSON-serializable dict for a User suitable for response models.
 
     Ensures date/time fields are ISO strings so FastAPI/Pydantic validation passes.
@@ -35,6 +74,7 @@ def _serialize_user(user: User) -> dict:
         "date_of_birth": None,
         "member_since": None,
         "emergency_contact": user.emergency_contact,
+        **_driver_document_state(user, db),
     }
 
     if getattr(user, "date_of_birth", None) is not None:
@@ -112,7 +152,7 @@ def verify_otp_endpoint(payload: OTPVerifyRequest, db: Session = Depends(get_db)
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": _serialize_user(db_user),
+        "user": _serialize_user(db_user, db),
         "is_new_user": is_new_user,
     }
 
@@ -131,13 +171,16 @@ def setup_profile_endpoint(
     current_user.role = payload.role
     db.commit()
     db.refresh(current_user)
-    return _serialize_user(current_user)
+    return _serialize_user(current_user, db)
 
 
 @router.get("/me", response_model=UserResponse)
-def get_profile(current_user: User = Depends(get_current_user)):
+def get_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return the full profile for the currently logged-in user."""
-    return _serialize_user(current_user)
+    return _serialize_user(current_user, db)
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -158,4 +201,4 @@ def update_profile(
 
     db.commit()
     db.refresh(current_user)
-    return _serialize_user(current_user)
+    return _serialize_user(current_user, db)

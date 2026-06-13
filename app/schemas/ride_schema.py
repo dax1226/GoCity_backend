@@ -107,6 +107,7 @@ class BookingResponse(BaseModel):
     driver: Optional[DriverResponse] = None
     driver_location: Optional[DriverLocationResponse] = None
     ride_otp: Optional[str] = None
+    otp_released: Optional[bool] = None
     otp_verified: Optional[bool] = None
     started_at: Optional[datetime] = None
 

@@ -9,6 +9,8 @@ psycopg2-binary
 geoalchemy2
 email-validator
 alembic
+# Redis — geospatial hot path for live driver locations (app/geo).
+redis>=5.0
 bcrypt
 python-jose[cryptography]
 # Optional — only needed when going live with Razorpay (see app/payment/routes.py).
@@ -16,3 +18,5 @@ python-jose[cryptography]
 razorpay
 twilio
 
+# Driver document uploads (multipart form / file uploads).
+python-multipart

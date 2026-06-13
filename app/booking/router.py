@@ -88,6 +88,8 @@ def _ensure_seed_drivers(db: Session) -> None:
             name=n, phone=p, vehicle_type=vt, vehicle_number=vn,
             rating=r, status="online",
             current_lat=lat, current_lng=lng,
+            documents_verified=True,
+            document_verification_status="verified",
         )
         for (n, p, vt, vn, r, lat, lng) in SEED_DRIVERS
     ])
@@ -106,7 +108,10 @@ def _pick_driver(
     to two simultaneous bookings."""
     _ensure_seed_drivers(db)
 
-    online_drivers = db.query(Driver).filter(Driver.status == "online").all()
+    online_drivers = db.query(Driver).filter(
+        Driver.status == "online",
+        Driver.documents_verified.is_(True),
+    ).all()
     if not online_drivers:
         return None
 
@@ -182,7 +187,10 @@ def _to_response(booking: Booking) -> BookingResponse:
         user=booking.user,
         driver=_driver_dto(booking.driver) if booking.driver else None,
         driver_location=driver_location,
-        ride_otp=booking.ride_otp,
+        # Only reveal the OTP to the passenger once the driver has pressed
+        # "Start Trip" (otp_released). Before that it stays hidden.
+        ride_otp=booking.ride_otp if booking.otp_released else None,
+        otp_released=booking.otp_released,
         otp_verified=booking.otp_verified,
         started_at=booking.started_at,
     )
@@ -316,6 +324,7 @@ def nearest_drivers(
         .filter(
             User.role == UserRole.RIDER,
             Driver.status == "online",
+            Driver.documents_verified.is_(True),
             Driver.current_lat.isnot(None),
             Driver.current_lng.isnot(None),
         )

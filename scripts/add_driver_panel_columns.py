@@ -1,11 +1,12 @@
-"""One-off migration for live tracking and ride-start OTP columns.
+"""One-off migration for the driver panel upgrade (pickup workflow columns).
 
-`Base.metadata.create_all()` creates new tables but does not ALTER existing
-ones, so run this once after deploying the model changes.
+`Base.metadata.create_all()` creates the new wallet/rating tables but does not
+ALTER the existing bookings table, so run this once after deploying the model
+changes.
 
 Usage:
     cd GoCity_backend
-    python -m scripts.add_ride_flow_columns
+    python -m scripts.add_driver_panel_columns
 """
 
 from sqlalchemy import text
@@ -14,20 +15,16 @@ from app.core.database import active_database_url, engine
 
 
 POSTGRES_COLUMNS = [
-    ("driver_lat", "DOUBLE PRECISION"),
-    ("driver_lng", "DOUBLE PRECISION"),
-    ("driver_loc_updated_at", "TIMESTAMP"),
-    ("ride_otp", "VARCHAR(6)"),
-    ("otp_released", "BOOLEAN DEFAULT FALSE"),
-    ("otp_verified", "BOOLEAN DEFAULT FALSE"),
-    ("started_at", "TIMESTAMP"),
+    ("arrived_at", "TIMESTAMP"),
+    ("wait_charge_amount", "DOUBLE PRECISION DEFAULT 0"),
+    ("pickup_verified", "BOOLEAN DEFAULT FALSE"),
+    ("completed_at", "TIMESTAMP"),
 ]
 
 SQLITE_TYPE_MAP = {
-    "DOUBLE PRECISION": "REAL",
-    "TIMESTAMP": "TIMESTAMP",
-    "VARCHAR(6)": "VARCHAR(6)",
     "BOOLEAN DEFAULT FALSE": "BOOLEAN DEFAULT 0",
+    "DOUBLE PRECISION DEFAULT 0": "REAL DEFAULT 0",
+    "TIMESTAMP": "TIMESTAMP",
 }
 
 
@@ -57,7 +54,7 @@ def main() -> None:
                 print(f"  - {name}: already present")
                 continue
 
-            col_type = SQLITE_TYPE_MAP[postgres_type] if is_sqlite else postgres_type
+            col_type = SQLITE_TYPE_MAP.get(postgres_type, postgres_type) if is_sqlite else postgres_type
             conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {col_type}"))
             print(f"  + {name} {col_type}: added")
 
