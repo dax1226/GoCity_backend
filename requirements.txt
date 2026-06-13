@@ -19,4 +19,7 @@ razorpay
 twilio
 
 # Driver document uploads (multipart form / file uploads).
+
+cloudinary
+
 python-multipart

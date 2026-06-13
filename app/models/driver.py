@@ -21,6 +21,7 @@ class Driver(Base):
     vehicle_number = Column(String, unique=True, nullable=False)
     rating = Column(Float, default=5.0)
     status = Column(String, default="online")
+    profile_image = Column(String, nullable=True)     # Cloudinary URL
 
     # Driver document uploads. New driver profiles default to "pending" until
     # the driver submits their documents; an admin reviews them out-of-band.

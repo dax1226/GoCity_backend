@@ -34,9 +34,13 @@ class UserResponse(BaseModel):
     date_of_birth: Optional[str] = None
     member_since: Optional[datetime] = None
     emergency_contact: Optional[str] = None
+
     documents_verified: bool = False
     document_verification_status: Optional[str] = None
     requires_document_verification: bool = False
+
+    profile_image: Optional[str] = None
+
 
     class Config:
         from_attributes = True

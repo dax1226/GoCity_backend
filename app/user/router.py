@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -17,6 +17,7 @@ from app.schemas import (
 from app.services.otp import generate_otp, send_otp, verify_otp
 import re
 from datetime import date, datetime
+from app.utils.cloudinary_upload import upload_image
 
 router = APIRouter()
 
@@ -74,7 +75,11 @@ def _serialize_user(user: User, db: Session | None = None) -> dict:
         "date_of_birth": None,
         "member_since": None,
         "emergency_contact": user.emergency_contact,
+
         **_driver_document_state(user, db),
+
+        "profile_image": user.profile_image,
+
     }
 
     if getattr(user, "date_of_birth", None) is not None:
@@ -201,4 +206,32 @@ def update_profile(
 
     db.commit()
     db.refresh(current_user)
+
     return _serialize_user(current_user, db)
+
+    return _serialize_user(current_user)
+
+
+@router.post("/me/profile-image", response_model=UserResponse)
+def upload_user_profile_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload and set the user's profile image."""
+    contents = file.file.read()
+    url = upload_image(contents, folder="gocity/users")
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to upload image to Cloudinary")
+    
+    current_user.profile_image = url
+    from app.models.driver import Driver
+    driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+    if driver:
+        driver.profile_image = url
+        
+    db.commit()
+    db.refresh(current_user)
+    
+    return _serialize_user(current_user)
+
