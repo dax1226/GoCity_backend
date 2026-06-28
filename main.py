@@ -16,8 +16,34 @@ from app.core.database import engine, Base
 # Base.metadata so create_all picks them up.
 from app import models  # noqa: F401
 
+from sqlalchemy import inspect, text
+
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Auto-migrate any missing columns on existing tables (SQLite/Postgres friendly)
+try:
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table_name, table in Base.metadata.tables.items():
+            if not inspector.has_table(table_name):
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            for col in table.columns:
+                if col.name not in existing_cols:
+                    col_type_str = col.type.compile(engine.dialect)
+                    default_clause = ""
+                    if col.default is not None and col.default.arg is not None and isinstance(col.default.arg, (int, float, str, bool)):
+                        val = col.default.arg
+                        if isinstance(val, bool):
+                            val = 1 if val else 0
+                        elif isinstance(val, str):
+                            val = f"'{val}'"
+                        default_clause = f" DEFAULT {val}"
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type_str}{default_clause}"))
+except Exception as e:
+    print(f"[DB] Auto-migration warning: {e}")
+
 
 
 app = FastAPI(title="GoCity Backend", version="1.0.0")
