@@ -29,12 +29,12 @@ so one or two dropped beats are tolerated before a driver is removed.
 
 ## Exact Redis commands
 
-**Heartbeat** (`POST /api/drivers/heartbeat`, driver app every ~4 s) runs, per
+**Heartbeat** (`POST /api/drivers/heartbeat`, driver app every ~8 s) runs, per
 driver, in one pipeline — note GEOADD takes **longitude first**:
 
 ```
 GEOADD drivers:online <lng> <lat> <driverId>
-SET    driver:<driverId>:alive 1 EX 10
+SET    driver:<driverId>:alive 1 EX 25
 HSET   driver:<driverId>:meta name <name> vehicleType <type> rating <rating>
 PUBLISH drivers:moved {"driverId":"<id>","lat":<lat>,"lng":<lng>}
 ```
@@ -126,7 +126,7 @@ python -m scripts.seed_fake_drivers --once
 # Override the center explicitly + set fleet size
 python -m scripts.seed_fake_drivers --center 23.0225,72.5714 --count 10
 
-# Demo the killed-heartbeat path: #3 and #7 expire within ~10s
+# Demo the killed-heartbeat path: #3 and #7 expire within ~25s
 python -m scripts.seed_fake_drivers --drop 3,7
 ```
 

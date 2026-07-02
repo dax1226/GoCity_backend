@@ -33,6 +33,7 @@ from app.models.user import User, UserRole
 from app.models.driver import Driver
 from app.models.ride import Booking
 from app.enums.ride_status import BookingType, BookingStatus
+from app.booking.service import expire_stale_pending_bookings
 from app.schemas.ride_schema import (
     RideBookingCreate,
     CabBookingCreate,
@@ -295,6 +296,10 @@ def list_my_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Resolve the passenger's own stale request (if any) before listing, so a
+    # forgotten "Searching for Rider" flips to "Cancelled" instead of hanging.
+    expire_stale_pending_bookings(db)
+
     bookings = (
         db.query(Booking)
         .options(joinedload(Booking.user), joinedload(Booking.driver))

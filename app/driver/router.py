@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 
@@ -20,6 +22,7 @@ from app.models.user import User, UserRole
 from app.models.driver import Driver
 from app.models.ride import Booking, DriverRideRejection
 from app.models.wallet import DriverCustomerRating, DriverWalletTransaction
+from app.booking.service import expire_stale_pending_bookings
 from app.enums.ride_status import BookingType, BookingStatus
 from app.utils.cloudinary_upload import upload_image
 
@@ -318,6 +321,40 @@ def get_driver_profile(
     return _driver_profile_response(driver, current_user)
 
 
+class UpdateVehiclePayload(BaseModel):
+    vehicle_number: Optional[str] = None
+    vehicle_type: Optional[str] = None
+
+
+@router.patch("/profile")
+def update_driver_profile(
+    payload: UpdateVehiclePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Let a driver edit their own vehicle info (number + type)."""
+    driver = _get_driver(db, current_user, auto_create=True, require_verified=False)
+
+    if payload.vehicle_number is not None:
+        number = payload.vehicle_number.strip()
+        if not number:
+            raise HTTPException(status_code=400, detail="Vehicle number cannot be empty")
+        driver.vehicle_number = number
+    if payload.vehicle_type is not None:
+        vtype = payload.vehicle_type.strip()
+        if not vtype:
+            raise HTTPException(status_code=400, detail="Vehicle type cannot be empty")
+        driver.vehicle_type = vtype
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="That vehicle number is already registered.")
+    db.refresh(driver)
+    return _driver_profile_response(driver, current_user)
+
+
 @router.post("/documents/upload")
 async def upload_driver_documents(
     license_number: str = Form(...),
@@ -465,6 +502,10 @@ def get_available_rides(
 ):
     driver = _get_driver(db, current_user)
 
+    # Auto-cancel requests that have been sitting unaccepted too long, so a
+    # passenger's forgotten booking never lingers here as a "fresh" request.
+    expire_stale_pending_bookings(db)
+
     # Bookings this driver has dismissed/cancelled are never offered again.
     rejected_ids = {
         row[0]
@@ -544,13 +585,21 @@ def accept_ride(
 def _record_ride_rejection(db: Session, driver_id: int, booking_id: int) -> None:
     """Remember that this driver dismissed/cancelled this booking (idempotent).
 
+    Uses INSERT ... ON CONFLICT DO NOTHING so two near-simultaneous rejects of
+    the same booking (the app polls the request list and can fire duplicate
+    taps) can't trip the uq_driver_booking_rejection unique constraint and 500.
+    A SELECT-then-INSERT check races under concurrency; this is atomic in the DB.
     Does not commit — the caller commits together with its other changes."""
-    exists = db.query(DriverRideRejection).filter(
-        DriverRideRejection.driver_id == driver_id,
-        DriverRideRejection.booking_id == booking_id,
-    ).first()
-    if not exists:
-        db.add(DriverRideRejection(driver_id=driver_id, booking_id=booking_id))
+    stmt = (
+        pg_insert(DriverRideRejection.__table__)
+        .values(
+            driver_id=driver_id,
+            booking_id=booking_id,
+            created_at=datetime.utcnow(),
+        )
+        .on_conflict_do_nothing(constraint="uq_driver_booking_rejection")
+    )
+    db.execute(stmt)
 
 
 @router.post("/rides/{booking_id}/reject")

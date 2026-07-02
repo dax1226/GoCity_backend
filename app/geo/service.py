@@ -3,7 +3,7 @@
 Design (locations live ONLY in Redis, never Postgres):
 
   drivers:online            GEO set. member = driverId, score = (lng, lat).
-  driver:{id}:alive         TTL marker, EX 10s. Heartbeats refresh it; once it
+  driver:{id}:alive         TTL marker, EX 25s. Heartbeats refresh it; once it
                             expires the driver is considered stale and dropped.
   driver:{id}:meta          HASH of lightweight profile fields (name, vehicle
                             type, rating) for fast callouts. On a cache miss we
@@ -27,7 +27,7 @@ from app.core.redis_client import (
 )
 
 GEO_KEY = "drivers:online"
-ALIVE_TTL_SECONDS = 10  # > heartbeat interval (~4s), so 1-2 misses tolerated
+ALIVE_TTL_SECONDS = 25  # comfortably > heartbeat interval (~8s), so 1-2 misses tolerated
 DEFAULT_RADIUS_KM = 3.0
 DEFAULT_COUNT = 50
 AVG_SPEED_KMH = 25.0  # for ETA estimation
@@ -64,9 +64,9 @@ async def heartbeat(
 ) -> None:
     """Upsert a driver's live position and refresh their alive marker.
 
-    Called every ~4s by the driver app. Runs as a single pipeline:
+    Called every ~8s by the driver app. Runs as a single pipeline:
       GEOADD drivers:online <lng> <lat> <id>
-      SET   driver:{id}:alive 1 EX 10
+      SET   driver:{id}:alive 1 EX 25
       HSET  driver:{id}:meta ...        (only if meta provided)
     Then publishes the move to ``drivers:moved``.
     """

@@ -9,7 +9,6 @@ from app.payment.router import router as payment_router
 from app.driver.router import router as driver_router
 from app.geo.router import router as geo_router
 from app.websocket.driver_status import router as driver_status_ws_router
-from app.admin.router import router as admin_router
 from app.core.database import engine, Base
 
 # Importing the models package side-effect-registers every table on
@@ -67,7 +66,6 @@ app.include_router(payment_router, prefix="/api/payment", tags=["payment"])
 app.include_router(driver_router, prefix="/api/driver", tags=["driver"])
 app.include_router(geo_router, prefix="/api/drivers", tags=["drivers-geo"])
 app.include_router(driver_status_ws_router, tags=["drivers-geo-ws"])
-app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/")

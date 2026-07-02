@@ -97,7 +97,7 @@ async def driver_heartbeat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Driver app heartbeat (~every 4s): upsert position + refresh alive TTL.
+    """Driver app heartbeat (~every 8s): upsert position + refresh alive TTL.
 
     Identity comes from the auth token, never the body. Profile meta is read
     from the Driver row and cached so /nearby callouts stay on the hot path.
