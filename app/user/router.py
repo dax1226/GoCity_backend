@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.security import create_access_token
@@ -204,12 +205,19 @@ def update_profile(
     for field, value in update_data.items():
         setattr(current_user, field, value)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # users.email is UNIQUE — a foreseeable conflict (the address belongs to
+        # another account) must be a clean 400, not a 500 crash.
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="This email is already registered to another account.",
+        )
     db.refresh(current_user)
 
     return _serialize_user(current_user, db)
-
-    return _serialize_user(current_user)
 
 
 @router.post("/me/profile-image", response_model=UserResponse)
