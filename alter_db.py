@@ -14,6 +14,12 @@ try:
 except Exception as e:
     print("drivers:", e)
 
+try:
+    cursor.execute("ALTER TABLE bookings ADD COLUMN load_assist JSON")
+    print("Added load_assist to bookings")
+except Exception as e:
+    print("bookings:", e)
+
 conn.commit()
 conn.close()
 print("Done")

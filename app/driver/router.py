@@ -225,6 +225,7 @@ def _to_booking_response(b: Booking, d: Driver):
         "receiver_name": b.receiver_name,
         "receiver_phone": b.receiver_phone,
         "parcel_size": b.parcel_size,
+        "load_assist": b.load_assist,
         "created_at": b.created_at.isoformat(),
         "user": {
             "id": b.user.id,
@@ -549,6 +550,7 @@ def get_available_rides(
             "estimated_fare": b.fare,
             "vehicle_type": b.vehicle_type or "auto",
             "parcel_size": b.parcel_size,
+            "load_assist": b.load_assist,
             "payment_method": b.payment_method,
             "passenger_name": b.user.name or "User",
             "passenger_rating": 4.9,

@@ -9,7 +9,7 @@ The single Booking table backs three booking surfaces (RIDE / CAB / PARCEL)
 distinguished by the booking_type enum.
 """
 
-from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Enum, Float, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -44,6 +44,10 @@ class Booking(Base):
     receiver_name = Column(String, nullable=True)
     receiver_phone = Column(String, nullable=True)
     parcel_size = Column(String, nullable=True)
+    # Loading/unloading add-on details for heavy (loading-vehicle) parcels.
+    # Spec shape: {selected, serviceType, pickup{...}, drop{...}, goodsType,
+    # itemCount, customerNotes, serviceFare} — see app/load_assist/service.py.
+    load_assist = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

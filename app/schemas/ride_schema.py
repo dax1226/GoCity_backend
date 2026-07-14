@@ -71,6 +71,9 @@ class ParcelBookingCreate(BaseModel):
     pickup_lng: Optional[float] = None
     drop_lat: Optional[float] = None
     drop_lng: Optional[float] = None
+    # Optional loading/unloading add-on (heavy parcels on loading vehicles).
+    # Spec shape validated by app/load_assist/service.py.
+    load_assist: Optional[dict] = None
 
 
 # ─────────────────────────────────────────────
@@ -102,6 +105,7 @@ class BookingResponse(BaseModel):
     receiver_name: Optional[str] = None
     receiver_phone: Optional[str] = None
     parcel_size: Optional[str] = None
+    load_assist: Optional[dict] = None
     created_at: datetime
     user: UserResponse
     driver: Optional[DriverResponse] = None

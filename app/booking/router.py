@@ -44,9 +44,42 @@ from app.schemas.ride_schema import (
     DatabaseSnapshot,
 )
 from app.services.otp import generate_otp
+from app.load_assist import (
+    PICKUP_TRUCK_CATEGORY,
+    calculate_service_fare,
+    validate_load_assist_payload,
+)
 
 
 router = APIRouter()
+
+# Parcel slabs delivered by loading vehicles (tempo / truck / van / pickup) —
+# the only parcels eligible for the loading/unloading add-on. Must stay in
+# sync with _SMALL_PARCEL_SIZES in app/driver/router.py.
+_LOAD_ASSIST_PARCEL_SIZES = ("large_package", "bulk_package")
+
+
+def _process_load_assist(load_assist: Optional[dict], parcel_size: str) -> Optional[dict]:
+    """Validate the loading/unloading add-on and return it with the service
+    fare computed server-side. Returns None when the add-on is not selected."""
+    if not isinstance(load_assist, dict) or load_assist.get("selected") is not True:
+        return None
+
+    if (parcel_size or "").lower() not in _LOAD_ASSIST_PARCEL_SIZES:
+        raise HTTPException(
+            status_code=400,
+            detail="Loading/unloading service is available only for 5-10 KG and 10-20 KG parcels.",
+        )
+
+    # Heavy parcels are dispatched to loading vehicles (pickup trucks), which
+    # is the vehicle category the add-on spec gates on.
+    spec_payload = {"vehicleCategory": PICKUP_TRUCK_CATEGORY, "loadAssist": load_assist}
+    validation = validate_load_assist_payload(spec_payload)
+    if not validation.is_valid:
+        raise HTTPException(status_code=400, detail="; ".join(validation.errors))
+
+    breakdown = calculate_service_fare(spec_payload)
+    return {**load_assist, "serviceFare": breakdown.service_fare}
 
 
 # ─────────────────────────────────────────────
@@ -184,6 +217,7 @@ def _to_response(booking: Booking) -> BookingResponse:
         receiver_name=booking.receiver_name,
         receiver_phone=booking.receiver_phone,
         parcel_size=booking.parcel_size,
+        load_assist=booking.load_assist,
         created_at=booking.created_at,
         user=booking.user,
         driver=_driver_dto(booking.driver) if booking.driver else None,
@@ -262,6 +296,7 @@ def create_parcel_booking(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    load_assist = _process_load_assist(payload.load_assist, payload.parcel_size)
     booking = Booking(
         user_id=current_user.id,
         driver_id=None,
@@ -280,6 +315,7 @@ def create_parcel_booking(
         receiver_name=payload.receiver_name,
         receiver_phone=payload.receiver_phone,
         parcel_size=payload.parcel_size,
+        load_assist=load_assist,
         ride_otp=generate_otp(),
     )
     db.add(booking)
