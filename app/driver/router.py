@@ -37,6 +37,13 @@ _VERIFICATION_REQUIRED_DETAIL = (
     "Driver documents must be verified before using the driver app."
 )
 
+# ─── Dev-only master license ─────────────────────────────────────────────────
+# Submitting this exact license number in the document upload endpoint bypasses
+# the admin verification step and auto-approves the driver. This lets
+# developers jump straight into testing the driver panel without waiting for
+# admin approval.  ⚠️ Remove or gate behind an env var before production.
+_DEV_MASTER_LICENSE = "GOCITY-DEV-0000"
+
 # ─── Pickup workflow / wallet constants ──────────────────────────────────────
 _ARRIVED_GEOFENCE_M = 200       # driver must be within this of pickup to tap ARRIVED
 _PERFECT_PICKUP_RADIUS_M = 150  # "Perfect Pick-up" if ride starts inside this
@@ -84,12 +91,12 @@ def _get_driver(
         driver = _create_driver_profile(db, current_user)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver profile not found")
-    # TEMP: Automated document verification was removed (drivers only upload
-    # documents for out-of-band admin review), so unverified drivers are NOT
-    # blocked from using the driver app. Re-enable this gate once the admin
-    # review/approval flow is in place.
-    # if require_verified and not driver.documents_verified:
-    #     raise HTTPException(status_code=403, detail=_VERIFICATION_REQUIRED_DETAIL)
+    # Drivers must have their documents approved by an admin (via the admin
+    # panel's driver verification endpoints) before they can go online, accept
+    # rides or earn. Profile/documents/wallet endpoints opt out with
+    # require_verified=False so an unverified driver can still submit documents.
+    if require_verified and not driver.documents_verified:
+        raise HTTPException(status_code=403, detail=_VERIFICATION_REQUIRED_DETAIL)
     return driver
 
 
@@ -359,16 +366,21 @@ def update_driver_profile(
 @router.post("/documents/upload")
 async def upload_driver_documents(
     license_number: str = Form(...),
-    license_image: UploadFile = File(...),
-    pan_document: UploadFile = File(...),
-    vehicle_document: UploadFile = File(...),
+    license_image: Optional[UploadFile] = File(None),
+    pan_document: Optional[UploadFile] = File(None),
+    vehicle_document: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Store the driver's submitted documents (License, PAN, RC Book).
 
-    Automated verification was removed — this only saves the uploaded files and
-    marks the driver as "pending" for out-of-band admin review.
+    Saves the uploaded files and marks the driver as "submitted" so the admin
+    panel lists them for review. An admin approving them (POST
+    /api/admin/drivers/{id}/verification) is what flips documents_verified and
+    unlocks the driver app.
+
+    Dev shortcut: submit license_number = "GOCITY-DEV-0000" (no files needed)
+    to auto-verify the driver instantly.
     """
     driver = _get_driver(
         db,
@@ -380,6 +392,28 @@ async def upload_driver_documents(
     license_number = license_number.strip()
     if not license_number:
         raise HTTPException(status_code=400, detail="License number is required")
+
+    # ── Dev bypass: master license auto-verifies without real documents ──
+    if license_number == _DEV_MASTER_LICENSE:
+        driver.license_number = license_number
+        driver.documents_verified = True
+        driver.document_verification_status = "verified"
+        driver.documents_submitted_at = datetime.utcnow()
+        db.commit()
+        db.refresh(driver)
+        return {
+            "documents_submitted": True,
+            "documents_verified": True,
+            "document_verification_status": "verified",
+            "message": "🔓 Dev master license accepted — documents auto-verified.",
+        }
+
+    # For normal submissions, all three document files are required.
+    if not license_image or not pan_document or not vehicle_document:
+        raise HTTPException(
+            status_code=400,
+            detail="All three documents (license image, PAN, vehicle RC) are required.",
+        )
 
     target_dir = _UPLOAD_ROOT / f"driver_{driver.id}"
     license_path = await _save_form_upload(
@@ -407,31 +441,15 @@ async def upload_driver_documents(
     driver.vehicle_document_path = vehicle_path
     driver.documents_submitted_at = datetime.utcnow()
     driver.documents_verified = False
-    driver.document_verification_status = "pending"
+    driver.document_verification_status = "submitted"
     db.commit()
     db.refresh(driver)
 
     return {
-
         "documents_submitted": True,
+        "documents_verified": False,
         "document_verification_status": driver.document_verification_status,
-        "message": "Documents uploaded. They are pending review.",
-
-        "id": driver.id,
-        "user_id": current_user.id,
-        "name": driver.name,
-        "phone": driver.phone,
-        "email": current_user.email or f"{current_user.id}@gocity.com",
-        "vehicle_type": driver.vehicle_type,
-        "vehicle_number": driver.vehicle_number,
-        "vehicle_model": "Standard vehicle",
-        "rating": driver.rating,
-        "status": driver.status,
-        "total_rides": len(driver.bookings),
-        "member_since": current_user.member_since.isoformat() if current_user.member_since else datetime.utcnow().isoformat(),
-        "profile_image": driver.profile_image,
-        "documents_verified": True
-
+        "message": "Documents uploaded. They are pending admin review.",
     }
 
 

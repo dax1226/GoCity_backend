@@ -1,6 +1,7 @@
 import os
 import random
 import time
+# pyrefly: ignore [missing-import]
 from twilio.rest import Client
 
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -34,7 +35,10 @@ def send_otp(phone: str, otp: str) -> None:
         return
         
     try:
+        print(f"[Twilio] Attempting to send OTP to {phone}...")
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        # Set a 10-second HTTP timeout on the underlying HTTP client
+        client.http_client.timeout = 10
         client.messages.create(
             body=f"Your GoCity verification code is: {otp}. Valid for 5 minutes.",
             from_=TWILIO_PHONE_NUMBER,

@@ -24,18 +24,13 @@ router = APIRouter()
 
 
 def _driver_document_state(user: User, db: Session | None) -> dict:
-    # TEMP: Strong license verification is skipped for now (OCR API not yet set
-    # up). Report every user as not requiring document verification so the app's
-    # redirect guards send drivers straight to the dashboard instead of looping
-    # back to the Driver Documents screen. Re-enable the real logic below once
-    # OCR verification is ready.
-    return {
-        "documents_verified": True,
-        "document_verification_status": "not_required",
-        "requires_document_verification": False,
-    }
+    """Document-verification state for a driver (RIDER-role) account.
 
-    # --- begin original document-state logic (re-enable later) ---
+    Statuses: "pending" (documents not yet submitted), "submitted" (awaiting
+    admin review), "verified" (approved — driver may take rides), "rejected"
+    (admin rejected — driver must re-upload). The app's redirect guards keep
+    the driver on the Driver Documents screen until an admin approves them.
+    """
     if user.role != UserRole.RIDER:
         return {
             "documents_verified": True,
@@ -58,7 +53,6 @@ def _driver_document_state(user: User, db: Session | None) -> dict:
         "document_verification_status": status,
         "requires_document_verification": not documents_verified,
     }
-    # --- end original document-state logic ---
 
 
 def _serialize_user(user: User, db: Session | None = None) -> dict:

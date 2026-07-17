@@ -23,9 +23,11 @@ class Driver(Base):
     status = Column(String, default="online")
     profile_image = Column(String, nullable=True)     # Cloudinary URL
 
-    # Driver document uploads. New driver profiles default to "pending" until
-    # the driver submits their documents; an admin reviews them out-of-band.
-    # (Automated verification was removed — see documents upload endpoint.)
+    # Driver document uploads. document_verification_status lifecycle:
+    #   "pending"   → profile created, documents not yet submitted
+    #   "submitted" → documents uploaded, awaiting admin review
+    #   "verified"  → admin approved (documents_verified=True; driver may earn)
+    #   "rejected"  → admin rejected; driver must re-upload
     documents_verified = Column(Boolean, default=False, nullable=False)
     document_verification_status = Column(String, default="pending", nullable=False)
     license_number = Column(String, nullable=True)
