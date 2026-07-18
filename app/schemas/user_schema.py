@@ -84,3 +84,6 @@ class SavedPlaceResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class FCMTokenUpdate(BaseModel):
+    fcm_token: str

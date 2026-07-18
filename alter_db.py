@@ -23,3 +23,10 @@ except Exception as e:
 conn.commit()
 conn.close()
 print("Done")
+
+
+try:
+    cursor.execute('ALTER TABLE users ADD COLUMN fcm_token VARCHAR')
+    print('Added fcm_token to users')
+except Exception as e:
+    print('users fcm_token:', e)

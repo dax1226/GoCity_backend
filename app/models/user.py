@@ -32,6 +32,7 @@ class User(Base):
     role = Column(Enum(UserRole), default=UserRole.USER)
 
     # Profile fields
+    fcm_token = Column(String, nullable=True)         # Firebase Cloud Messaging token
     gender = Column(String, nullable=True)           # "Male" or "Female"
     date_of_birth = Column(String, nullable=True)     # ISO date string "YYYY-MM-DD"
     member_since = Column(DateTime, default=datetime.utcnow)
