@@ -15,6 +15,7 @@ from app.schemas import (
     UserProfileUpdate,
     Token,
 )
+from app.schemas.user_schema import FCMTokenUpdate
 from app.services.otp import generate_otp, send_otp, verify_otp
 import re
 from datetime import date, datetime
@@ -116,11 +117,11 @@ def _normalise_phone(raw: str) -> str:
 
 
 @router.post("/send-otp")
-def send_otp_endpoint(payload: PhoneRequest):
+async def send_otp_endpoint(payload: PhoneRequest):
     """Generate and send an OTP to the user's phone number."""
     phone = _normalise_phone(payload.phone)
     otp = generate_otp()
-    send_otp(phone, otp)
+    await send_otp(phone, otp)
     return {"message": "OTP sent successfully"}
 
 
@@ -237,3 +238,9 @@ def upload_user_profile_image(
     
     return _serialize_user(current_user)
 
+@router.patch('/me/fcm-token')
+def update_fcm_token(payload: FCMTokenUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    "Update the user FCM token for push notifications."
+    current_user.fcm_token = payload.fcm_token
+    db.commit()
+    return {'message': 'FCM token updated successfully'}

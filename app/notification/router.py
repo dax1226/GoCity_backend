@@ -187,4 +187,24 @@ def simulate_notification(
     db.add(notif)
     db.commit()
     db.refresh(notif)
+    
+    # Try sending FCM push notification
+    if current_user.fcm_token:
+        from app.services.notifications import send_push_notification
+        data = {
+            "notification_id": str(notif.id),
+            "type": notif.type.value,
+        }
+        if booking_id:
+            data["booking_id"] = str(booking_id)
+        
+        # Send synchronously (can be moved to BackgroundTasks for prod)
+        send_push_notification(
+            fcm_token=current_user.fcm_token,
+            title=title,
+            body=message,
+            data=data
+        )
+        
     return notif
+

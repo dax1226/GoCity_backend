@@ -46,7 +46,13 @@ except Exception as e:
 
 
 
+from app.services.notifications import init_firebase
+
 app = FastAPI(title="GoCity Backend", version="1.0.0")
+
+@app.on_event("startup")
+def startup_event():
+    init_firebase()
 
 
 # CORS middleware
