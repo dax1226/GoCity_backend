@@ -44,6 +44,7 @@ from app.schemas.ride_schema import (
     DatabaseSnapshot,
 )
 from app.services.otp import generate_otp
+from app.utils.fare import PER_KM_RATE, fare_between_points, fare_for_distance
 from app.load_assist import (
     PICKUP_TRUCK_CATEGORY,
     calculate_service_fare,
@@ -344,6 +345,39 @@ def list_my_bookings(
         .all()
     )
     return [_to_response(b) for b in bookings]
+
+
+@router.get("/fare-estimate")
+def fare_estimate(
+    pickup_lat: Optional[float] = Query(None, description="Pickup latitude"),
+    pickup_lng: Optional[float] = Query(None, description="Pickup longitude"),
+    drop_lat: Optional[float] = Query(None, description="Drop latitude"),
+    drop_lng: Optional[float] = Query(None, description="Drop longitude"),
+    distance_km: Optional[float] = Query(
+        None, description="Trip distance in km (alternative to passing coordinates)"
+    ),
+):
+    """Distance-based fare estimate at a flat ₹19/km.
+
+    Pass either an explicit `distance_km`, or the pickup/drop coordinates and
+    the great-circle distance is measured for you. Coordinates take precedence
+    when both are supplied.
+    """
+    has_coords = None not in (pickup_lat, pickup_lng, drop_lat, drop_lng)
+    if has_coords:
+        return fare_between_points(pickup_lat, pickup_lng, drop_lat, drop_lng)
+
+    if distance_km is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide distance_km, or all of pickup_lat/pickup_lng/drop_lat/drop_lng.",
+        )
+
+    return {
+        "distance_km": round(max(0.0, distance_km), 2),
+        "per_km_rate": PER_KM_RATE,
+        "fare": fare_for_distance(distance_km),
+    }
 
 
 @router.get("/nearest-drivers", response_model=List[DriverResponse])
