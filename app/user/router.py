@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -6,7 +7,11 @@ from app.core.database import get_db
 from app.core.security import create_access_token
 from app.user.service import get_current_user
 from app.models.driver import Driver
-from app.models.user import User, UserRole
+from app.models.ride import Booking, DriverRideRejection
+from app.models.tracking import Notification
+from app.models.user import SavedPlace, User, UserRole
+from app.models.wallet import DriverCustomerRating, DriverWalletTransaction
+from app.enums.ride_status import BookingStatus
 from app.schemas import (
     PhoneRequest,
     OTPVerifyRequest,
@@ -213,6 +218,129 @@ def update_profile(
     db.refresh(current_user)
 
     return _serialize_user(current_user, db)
+
+
+@router.delete("/me")
+def delete_account(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete the authenticated account and its personal data.
+
+    An active booking must be completed or cancelled first. This avoids
+    orphaning an in-progress ride for either the customer or driver. Completed
+    history, saved places, notifications, ratings, and an optional driver
+    profile/ledger are removed in one database transaction.
+    """
+    active_statuses = (
+        BookingStatus.PENDING,
+        BookingStatus.ACCEPTED,
+        BookingStatus.ONGOING,
+    )
+    driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+
+    own_active_booking = (
+        db.query(Booking.id)
+        .filter(
+            Booking.user_id == current_user.id,
+            Booking.status.in_(active_statuses),
+        )
+        .first()
+    )
+    driver_active_booking = None
+    if driver is not None:
+        driver_active_booking = (
+            db.query(Booking.id)
+            .filter(
+                Booking.driver_id == driver.id,
+                Booking.status.in_(active_statuses),
+            )
+            .first()
+        )
+
+    if own_active_booking or driver_active_booking:
+        raise HTTPException(
+            status_code=409,
+            detail="Cancel or complete your active ride before deleting this account.",
+        )
+
+    owned_booking_ids = [
+        booking_id
+        for (booking_id,) in db.query(Booking.id)
+        .filter(Booking.user_id == current_user.id)
+        .all()
+    ]
+
+    try:
+        # Records owned directly by the user.
+        db.query(Notification).filter(Notification.user_id == current_user.id).delete(
+            synchronize_session=False,
+        )
+        db.query(SavedPlace).filter(SavedPlace.user_id == current_user.id).delete(
+            synchronize_session=False,
+        )
+        db.query(DriverCustomerRating).filter(
+            DriverCustomerRating.user_id == current_user.id,
+        ).delete(synchronize_session=False)
+
+        if owned_booking_ids:
+            # Preserve other users' notifications/ledger rows, but detach them
+            # from the booking that is about to be deleted.
+            db.query(Notification).filter(
+                Notification.booking_id.in_(owned_booking_ids),
+            ).update({Notification.booking_id: None}, synchronize_session=False)
+            db.query(DriverWalletTransaction).filter(
+                DriverWalletTransaction.booking_id.in_(owned_booking_ids),
+            ).update({DriverWalletTransaction.booking_id: None}, synchronize_session=False)
+            db.query(DriverCustomerRating).filter(
+                DriverCustomerRating.booking_id.in_(owned_booking_ids),
+            ).delete(synchronize_session=False)
+            db.query(DriverRideRejection).filter(
+                DriverRideRejection.booking_id.in_(owned_booking_ids),
+            ).delete(synchronize_session=False)
+
+        if driver is not None:
+            # Driver accounts are linked to users by phone. Remove only the
+            # driver's financial/profile records; another customer's completed
+            # booking history remains, with the deleted driver detached.
+            db.query(DriverRideRejection).filter(
+                DriverRideRejection.driver_id == driver.id,
+            ).delete(synchronize_session=False)
+            db.query(DriverWalletTransaction).filter(
+                DriverWalletTransaction.driver_id == driver.id,
+            ).delete(synchronize_session=False)
+            db.query(DriverCustomerRating).filter(
+                or_(
+                    DriverCustomerRating.driver_id == driver.id,
+                    DriverCustomerRating.user_id == current_user.id,
+                ),
+            ).delete(synchronize_session=False)
+            db.query(Booking).filter(
+                Booking.driver_id == driver.id,
+                Booking.user_id != current_user.id,
+            ).update(
+                {
+                    Booking.driver_id: None,
+                    Booking.driver_lat: None,
+                    Booking.driver_lng: None,
+                    Booking.driver_loc_updated_at: None,
+                },
+                synchronize_session=False,
+            )
+            db.delete(driver)
+
+        # Explicitly delete bookings rather than relying on database-specific
+        # foreign-key cascade configuration (the app supports SQLite + Postgres).
+        db.query(Booking).filter(Booking.user_id == current_user.id).delete(
+            synchronize_session=False,
+        )
+        db.delete(current_user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Could not delete the account. Please try again.")
+
+    return {"message": "Account deleted"}
 
 
 @router.post("/me/profile-image", response_model=UserResponse)

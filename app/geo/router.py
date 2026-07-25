@@ -17,11 +17,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.redis_client import RedisUnavailable, ping
+from app.core.redis_client import ping
 from app.geo import service as geo_service
 from app.models.driver import Driver
 from app.models.user import User
 from app.user.service import get_current_user
+from app.utils.geo import haversine_km
 
 router = APIRouter()
 
@@ -50,15 +51,49 @@ def _driver_meta_lookup(db: Session):
     return lookup
 
 
-async def _require_redis() -> None:
-    if not await ping():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Driver location service (Redis) is unavailable. "
-                "Start Redis and set REDIS_URL — see app/geo/README.md."
-            ),
+def _nearby_from_database(
+    db: Session,
+    lat: float,
+    lng: float,
+    radius_km: float,
+) -> list[dict[str, Any]]:
+    """Degraded-mode nearby lookup when the Redis geo index is unavailable.
+
+    The driver heartbeat persists each location to the Driver row first, so
+    riders can still discover online drivers during a Redis outage. This path
+    is intentionally only a fallback; Redis remains the scalable hot path.
+    """
+    candidates = (
+        db.query(Driver)
+        .filter(
+            Driver.status == "online",
+            Driver.current_lat.isnot(None),
+            Driver.current_lng.isnot(None),
         )
+        .all()
+    )
+
+    nearby: list[dict[str, Any]] = []
+    for driver in candidates:
+        distance_km = haversine_km(lat, lng, driver.current_lat, driver.current_lng)
+        if distance_km > radius_km:
+            continue
+        rounded_distance = round(distance_km, 2)
+        nearby.append(
+            {
+                "driverId": str(driver.id),
+                "lat": driver.current_lat,
+                "lng": driver.current_lng,
+                "distanceKm": rounded_distance,
+                "etaMin": max(1, round(rounded_distance / 25 * 60)),
+                "vehicleType": driver.vehicle_type,
+                "name": driver.name,
+                "rating": driver.rating,
+            }
+        )
+
+    nearby.sort(key=lambda driver: driver["distanceKm"])
+    return nearby
 
 
 @router.get("/nearby")
@@ -74,16 +109,23 @@ async def get_nearby_drivers(
     marker expired; enriches survivors with cached meta (Postgres fallback on
     a miss). Public so the rider map can poll it without driver auth.
     """
-    await _require_redis()
-    # Remember the user's live location so the seed script can center fake
-    # drivers on it (dev convenience only; see scripts/seed_fake_drivers.py).
-    await geo_service.record_rider_query(lat, lng)
-    return await geo_service.nearby(
-        lat,
-        lng,
-        radius_km=radius_km,
-        db_lookup=_driver_meta_lookup(db),
-    )
+    if await ping():
+        try:
+            # Remember the user's live location so the seed script can center
+            # fake drivers on it (dev convenience only; see the seed script).
+            await geo_service.record_rider_query(lat, lng)
+            return await geo_service.nearby(
+                lat,
+                lng,
+                radius_km=radius_km,
+                db_lookup=_driver_meta_lookup(db),
+            )
+        except Exception:
+            # A Redis connection can drop after its health check. Fall through
+            # to the persisted locations instead of taking the rider map down.
+            pass
+
+    return _nearby_from_database(db, lat, lng, radius_km)
 
 
 class HeartbeatPayload(BaseModel):
@@ -102,24 +144,33 @@ async def driver_heartbeat(
     Identity comes from the auth token, never the body. Profile meta is read
     from the Driver row and cached so /nearby callouts stay on the hot path.
     """
-    await _require_redis()
-
     driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver profile not found")
 
-    try:
-        await geo_service.heartbeat(
-            driver.id,
-            payload.lat,
-            payload.lng,
-            meta={
-                "name": driver.name or "Driver",
-                "vehicleType": driver.vehicle_type or "auto",
-                "rating": driver.rating if driver.rating is not None else 5.0,
-            },
-        )
-    except RedisUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # Keep a durable last-known location before attempting Redis. It powers the
+    # database fallback above and makes live sharing resilient to a Redis
+    # outage, instead of silently discarding every driver heartbeat.
+    driver.current_lat = payload.lat
+    driver.current_lng = payload.lng
+    db.commit()
 
-    return {"ok": True, "driverId": str(driver.id)}
+    live_index_updated = False
+    if await ping():
+        try:
+            await geo_service.heartbeat(
+                driver.id,
+                payload.lat,
+                payload.lng,
+                meta={
+                    "name": driver.name or "Driver",
+                    "vehicleType": driver.vehicle_type or "auto",
+                    "rating": driver.rating if driver.rating is not None else 5.0,
+                },
+            )
+            live_index_updated = True
+        except Exception:
+            # The persisted location above is still usable by /nearby.
+            pass
+
+    return {"ok": True, "driverId": str(driver.id), "liveIndexUpdated": live_index_updated}
