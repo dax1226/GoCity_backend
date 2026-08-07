@@ -57,10 +57,13 @@ class Booking(Base):
     driver_loc_updated_at = Column(DateTime, nullable=True)
 
     # OTP for trip start verification.
-    # ride_otp is generated at booking time but only revealed to the passenger
-    # once the driver presses "Start Trip" (otp_released = True). The driver then
-    # enters the OTP the passenger reads back to flip the ride to ONGOING.
+    # ``ride_otp`` is a legacy column retained only for a staged rollout. New
+    # rows leave it NULL: a code is deterministically derived from booking id
+    # + ``ride_otp_expires_at`` using a server secret, so plaintext OTPs never
+    # land in the database.
     ride_otp = Column(String(6), nullable=True)
+    ride_otp_expires_at = Column(DateTime, nullable=True)
+    ride_otp_attempts_remaining = Column(Integer, nullable=True)
     otp_released = Column(Boolean, default=False)
     otp_verified = Column(Boolean, default=False)
     started_at = Column(DateTime, nullable=True)

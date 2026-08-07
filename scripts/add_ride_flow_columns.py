@@ -17,7 +17,12 @@ POSTGRES_COLUMNS = [
     ("driver_lat", "DOUBLE PRECISION"),
     ("driver_lng", "DOUBLE PRECISION"),
     ("driver_loc_updated_at", "TIMESTAMP"),
+    # New ride codes are derived from booking id + this expiry timestamp. The
+    # legacy ride_otp column remains only so older databases can roll forward
+    # safely; new application code never writes plaintext OTPs to it.
     ("ride_otp", "VARCHAR(6)"),
+    ("ride_otp_expires_at", "TIMESTAMP"),
+    ("ride_otp_attempts_remaining", "INTEGER"),
     ("otp_released", "BOOLEAN DEFAULT FALSE"),
     ("otp_verified", "BOOLEAN DEFAULT FALSE"),
     ("started_at", "TIMESTAMP"),
@@ -26,6 +31,7 @@ POSTGRES_COLUMNS = [
 SQLITE_TYPE_MAP = {
     "DOUBLE PRECISION": "REAL",
     "TIMESTAMP": "TIMESTAMP",
+    "INTEGER": "INTEGER",
     "VARCHAR(6)": "VARCHAR(6)",
     "BOOLEAN DEFAULT FALSE": "BOOLEAN DEFAULT 0",
 }
@@ -60,6 +66,18 @@ def main() -> None:
             col_type = SQLITE_TYPE_MAP[postgres_type] if is_sqlite else postgres_type
             conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {col_type}"))
             print(f"  + {name} {col_type}: added")
+
+        # OTPs on terminal rides are never needed again. Removing these legacy
+        # plaintext values is safe and keeps old history from retaining secrets.
+        result = conn.execute(
+            text(
+                "UPDATE bookings SET ride_otp = NULL "
+                "WHERE ride_otp IS NOT NULL "
+                "AND (status IN ('COMPLETED', 'CANCELLED') OR otp_verified = TRUE)"
+            )
+        )
+        if result.rowcount and result.rowcount > 0:
+            print(f"  + cleared legacy OTPs from {result.rowcount} terminal booking(s)")
 
     print(f"\nDone against {active_database_url.split('@')[-1] or active_database_url}")
 

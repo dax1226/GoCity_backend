@@ -5,7 +5,11 @@ Run from the GoCity_backend directory:
 
 Credentials it creates:
     phone:    +919999999999
-    OTP:      123456 (dev master code)
+    OTP:      delivered by the configured provider
+
+For local testing without an SMS provider, explicitly set both:
+    APP_ENV=development
+    OTP_DEV_MASTER_CODE=<your test code>
 
 Safe to re-run — it won't duplicate if the user already exists.
 """
@@ -39,7 +43,7 @@ def main() -> None:
         print(f"Created user id={user.id} phone={user.phone}")
         print("Login with:")
         print("  phone:    +919999999999")
-        print("  OTP code: 123456 (dev master code)")
+        print("  OTP:      delivered by the configured provider")
     finally:
         db.close()
 

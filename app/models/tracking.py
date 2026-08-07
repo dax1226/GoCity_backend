@@ -43,7 +43,7 @@ class Notification(Base):
     driver_lat = Column(Float, nullable=True)
     driver_lng = Column(Float, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("User")
     booking = relationship("Booking")

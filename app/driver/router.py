@@ -24,6 +24,12 @@ from app.models.ride import Booking, DriverRideRejection
 from app.models.wallet import DriverCustomerRating, DriverWalletTransaction
 from app.booking.service import expire_stale_pending_bookings
 from app.enums.ride_status import BookingType, BookingStatus
+from app.services.ride_otp import (
+    RIDE_OTP_MAX_VERIFY_ATTEMPTS,
+    issue_ride_otp_expiry,
+    reveal_ride_otp,
+    verify_ride_otp as verify_start_ride_otp,
+)
 from app.utils.cloudinary_upload import upload_image
 
 router = APIRouter()
@@ -252,7 +258,8 @@ def _to_booking_response(b: Booking, d: Driver):
             "current_lng": d.current_lng,
         } if d else None,
         "driver_location": driver_location,
-        "ride_otp": b.ride_otp,
+        # The driver must never receive the passenger-facing start code.
+        "ride_otp": None,
         "otp_released": b.otp_released,
         "otp_verified": b.otp_verified,
         "started_at": b.started_at.isoformat() if b.started_at else None,
@@ -704,10 +711,10 @@ def start_ride(
 ):
     """Driver pressed "Start Trip" — release the ride OTP to the passenger.
 
-    This does NOT begin the ride. It only flips otp_released so the passenger's
-    booking polling reveals the OTP. The passenger reads it back and the driver
-    confirms it via /verify-otp, which is what actually moves the ride to
-    ONGOING.
+    This does NOT begin the ride. It issues a time-limited, passenger-facing
+    code without writing the plaintext value to the database. The passenger
+    reads it back and the driver confirms it via /verify-otp, which is what
+    actually moves the ride to ONGOING.
     """
     driver = _get_driver(db, current_user)
 
@@ -720,9 +727,20 @@ def start_ride(
     if booking.status != BookingStatus.ACCEPTED:
         raise HTTPException(status_code=400, detail="Ride is not in ACCEPTED state")
 
-    if not booking.ride_otp:
-        raise HTTPException(status_code=400, detail="Ride OTP is missing")
+    # Preserve a still-valid code on an accidental repeat tap. If an earlier
+    # code expired (or this is a legacy booking), issue a fresh one instead.
+    if booking.otp_released and reveal_ride_otp(booking.id, booking.ride_otp_expires_at):
+        if booking.ride_otp_attempts_remaining is None:
+            # Covers a rolling deploy where the expiry column exists before
+            # the retry-budget column.
+            booking.ride_otp_attempts_remaining = RIDE_OTP_MAX_VERIFY_ATTEMPTS
+            db.commit()
+            db.refresh(booking)
+        return _to_booking_response(booking, driver)
 
+    booking.ride_otp = None  # clear any legacy plaintext OTP during rollout
+    booking.ride_otp_expires_at = issue_ride_otp_expiry()
+    booking.ride_otp_attempts_remaining = RIDE_OTP_MAX_VERIFY_ATTEMPTS
     booking.otp_released = True
     db.commit()
     db.refresh(booking)
@@ -758,6 +776,9 @@ def complete_ride(
     booking.fare = round((booking.fare or 0.0) + (booking.wait_charge_amount or 0.0), 2)
 
     booking.status = BookingStatus.COMPLETED
+    booking.ride_otp = None
+    booking.ride_otp_expires_at = None
+    booking.ride_otp_attempts_remaining = None
     booking.completed_at = datetime.utcnow()
     driver.status = "online"
 
@@ -800,6 +821,9 @@ def cancel_ride(
         raise HTTPException(status_code=404, detail="Booking not found or not assigned to you")
         
     booking.status = BookingStatus.CANCELLED
+    booking.ride_otp = None
+    booking.ride_otp_expires_at = None
+    booking.ride_otp_attempts_remaining = None
     driver.status = "online"
     # If this booking is ever re-queued (or the dispatch logic changes), the
     # driver who cancelled it must not be offered it again.
@@ -911,8 +935,7 @@ def verify_ride_otp(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Verify OTP to start a ride. OTP was generated at booking creation
-    and shown to the user. Driver enters it to confirm pickup."""
+    """Verify a short-lived, passenger-facing code to start a ride."""
     driver = _get_driver(db, current_user)
 
     booking = db.query(Booking).options(joinedload(Booking.user)).filter(
@@ -928,13 +951,25 @@ def verify_ride_otp(
     if not booking.otp_released:
         raise HTTPException(status_code=400, detail="Press Start Trip to release the OTP first")
 
-    if not booking.ride_otp:
-        raise HTTPException(status_code=400, detail="Ride OTP is missing")
+    attempts_remaining = booking.ride_otp_attempts_remaining or 0
+    if attempts_remaining <= 0:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
-    if payload.otp.strip() != booking.ride_otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
+    if not verify_start_ride_otp(
+        booking.id,
+        booking.ride_otp_expires_at,
+        payload.otp,
+    ):
+        booking.ride_otp_attempts_remaining = attempts_remaining - 1
+        if booking.ride_otp_attempts_remaining <= 0:
+            booking.ride_otp_expires_at = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     now = datetime.utcnow()
+    booking.ride_otp = None
+    booking.ride_otp_expires_at = None
+    booking.ride_otp_attempts_remaining = None
     booking.otp_verified = True
     booking.status = BookingStatus.ONGOING
     booking.started_at = now

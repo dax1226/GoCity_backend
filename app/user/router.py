@@ -21,7 +21,13 @@ from app.schemas import (
     Token,
 )
 from app.schemas.user_schema import FCMTokenUpdate
-from app.services.otp import generate_otp, send_otp, verify_otp
+from app.services.otp import (
+    OTPDeliveryError,
+    OTPRateLimited,
+    generate_otp,
+    send_otp,
+    verify_otp,
+)
 import re
 from datetime import date, datetime
 from app.utils.cloudinary_upload import upload_image
@@ -126,7 +132,20 @@ async def send_otp_endpoint(payload: PhoneRequest):
     """Generate and send an OTP to the user's phone number."""
     phone = _normalise_phone(payload.phone)
     otp = generate_otp()
-    await send_otp(phone, otp)
+    try:
+        await send_otp(phone, otp)
+    except OTPRateLimited as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Please wait before requesting another verification code.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except OTPDeliveryError as exc:
+        # Do not expose provider details (or the OTP) to API clients.
+        raise HTTPException(
+            status_code=503,
+            detail="Verification SMS is temporarily unavailable. Please try again.",
+        ) from exc
     return {"message": "OTP sent successfully"}
 
 
@@ -372,3 +391,15 @@ def update_fcm_token(payload: FCMTokenUpdate, db: Session = Depends(get_db), cur
     current_user.fcm_token = payload.fcm_token
     db.commit()
     return {'message': 'FCM token updated successfully'}
+
+
+@router.delete('/me/fcm-token')
+def clear_fcm_token(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Invalidate the current device token during logout.
+
+    The current schema supports one active token per user, so clearing it is
+    safer than allowing a signed-out device to keep receiving notifications.
+    """
+    current_user.fcm_token = None
+    db.commit()
+    return {'message': 'FCM token cleared'}

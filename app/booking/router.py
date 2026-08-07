@@ -43,7 +43,7 @@ from app.schemas.ride_schema import (
     DriverLocationResponse,
     DatabaseSnapshot,
 )
-from app.services.otp import generate_otp
+from app.services.ride_otp import reveal_ride_otp
 from app.utils.fare import PER_KM_RATE, fare_between_points, fare_for_distance
 from app.load_assist import (
     PICKUP_TRUCK_CATEGORY,
@@ -189,7 +189,7 @@ def _driver_dto(d: Driver) -> DriverResponse:
     )
 
 
-def _to_response(booking: Booking) -> BookingResponse:
+def _to_response(booking: Booking, *, include_ride_otp: bool = False) -> BookingResponse:
     driver_location = None
     if (
         booking.driver_lat is not None
@@ -223,9 +223,18 @@ def _to_response(booking: Booking) -> BookingResponse:
         user=booking.user,
         driver=_driver_dto(booking.driver) if booking.driver else None,
         driver_location=driver_location,
-        # Only reveal the OTP to the passenger once the driver has pressed
-        # "Start Trip" (otp_released). Before that it stays hidden.
-        ride_otp=booking.ride_otp if booking.otp_released else None,
+        # A current start code is derived from the booking id and expiry. The
+        # database does not retain the plaintext value.
+        ride_otp=(
+            reveal_ride_otp(booking.id, booking.ride_otp_expires_at)
+            if (
+                include_ride_otp
+                and booking.status == BookingStatus.ACCEPTED
+                and booking.otp_released
+                and not booking.otp_verified
+            )
+            else None
+        ),
         otp_released=booking.otp_released,
         otp_verified=booking.otp_verified,
         started_at=booking.started_at,
@@ -255,7 +264,6 @@ def create_ride_booking(
         fare=payload.fare,
         status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
-        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()
@@ -283,7 +291,6 @@ def create_cab_booking(
         fare=payload.fare,
         status=BookingStatus.PENDING,
         payment_method=payload.payment_method,
-        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()
@@ -317,7 +324,6 @@ def create_parcel_booking(
         receiver_phone=payload.receiver_phone,
         parcel_size=payload.parcel_size,
         load_assist=load_assist,
-        ride_otp=generate_otp(),
     )
     db.add(booking)
     db.commit()
@@ -344,7 +350,7 @@ def list_my_bookings(
         .order_by(Booking.created_at.desc())
         .all()
     )
-    return [_to_response(b) for b in bookings]
+    return [_to_response(b, include_ride_otp=True) for b in bookings]
 
 
 @router.get("/fare-estimate")
@@ -421,21 +427,18 @@ def database_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Used by the in-app database viewer.
+    """Return only the authenticated user's own data-viewer snapshot.
 
-    Returns the rider and user records associated with every booking, plus
-    the underlying users + drivers tables so the screen can render a
-    spreadsheet-like dump of what is stored after a ride/cab/parcel booking.
-
-    Auth required — this endpoint exposes PII (emails, phones, names) for
-    every user and driver in the system. TODO: gate on an admin role once
-    one exists; for now any authenticated user can read it.
+    Global records belong in the protected admin API. This route remains for
+    the customer app's local viewer, but must never reveal another user's PII.
     """
-    users = db.query(User).order_by(User.id.asc()).all()
-    drivers_raw = db.query(Driver).order_by(Driver.id.asc()).all()
+    users = [current_user]
+    own_driver = db.query(Driver).filter(Driver.phone == current_user.phone).first()
+    drivers_raw = [own_driver] if own_driver else []
     bookings = (
         db.query(Booking)
         .options(joinedload(Booking.user), joinedload(Booking.driver))
+        .filter(Booking.user_id == current_user.id)
         .order_by(Booking.created_at.desc())
         .all()
     )
@@ -473,9 +476,13 @@ def update_booking_status(
         booking.driver.status = "online"
 
     booking.status = new_status
+    if new_status in terminal_states:
+        booking.ride_otp = None
+        booking.ride_otp_expires_at = None
+        booking.ride_otp_attempts_remaining = None
     db.commit()
     db.refresh(booking)
-    return _to_response(booking)
+    return _to_response(booking, include_ride_otp=True)
 
 
 @router.delete("/{booking_id}", status_code=200)

@@ -1,5 +1,13 @@
+import asyncio
+from contextlib import suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.observability import RequestTimingMiddleware, configure_logging
+
+# Initialise logging before router/database imports perform any startup work.
+configure_logging()
 
 from app.user.router import router as user_router
 from app.booking.router import router as booking_router
@@ -47,12 +55,29 @@ except Exception as e:
 
 
 from app.services.notifications import init_firebase
+from app.services.retention import retention_loop
+from app.core.redis_client import close as close_redis
 
 app = FastAPI(title="GoCity Backend", version="1.0.0")
 
+# Add a request id and latency measurement to every endpoint.  The middleware
+# intentionally logs route templates, never request bodies or query strings.
+app.add_middleware(RequestTimingMiddleware)
+
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     init_firebase()
+    app.state.retention_task = asyncio.create_task(retention_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    retention_task = getattr(app.state, "retention_task", None)
+    if retention_task is not None:
+        retention_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await retention_task
+    await close_redis()
 
 
 # CORS middleware

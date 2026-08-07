@@ -1,8 +1,12 @@
+import time
+
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 from dotenv import load_dotenv
+
+from app.core.observability import LOGGER, SLOW_QUERY_MS, sql_fingerprint
 
 load_dotenv()
 
@@ -67,6 +71,35 @@ if active_database_url.startswith("postgresql") and not _can_connect(engine):
         )
         active_database_url = DEFAULT_SQLITE_URL
         engine = _build_engine(active_database_url)
+
+
+@event.listens_for(engine, "before_cursor_execute")
+def _start_query_timer(conn, cursor, statement, parameters, context, executemany):
+    """Start a timer without retaining SQL parameters or result data."""
+    context._gocity_query_started_at = time.perf_counter()
+
+
+@event.listens_for(engine, "after_cursor_execute")
+def _log_slow_query(conn, cursor, statement, parameters, context, executemany):
+    started_at = getattr(context, "_gocity_query_started_at", None)
+    if started_at is None:
+        return
+
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    if duration_ms >= SLOW_QUERY_MS:
+        LOGGER.warning(
+            "slow_query duration_ms=%.2f rows=%s statement=%s",
+            duration_ms,
+            cursor.rowcount,
+            sql_fingerprint(statement),
+        )
+    else:
+        LOGGER.debug(
+            "query_complete duration_ms=%.2f rows=%s statement=%s",
+            duration_ms,
+            cursor.rowcount,
+            sql_fingerprint(statement),
+        )
 
 # Auto-enable PostGIS on Postgres connections (no-op for SQLite).
 if active_database_url.startswith("postgres"):
