@@ -1,34 +1,44 @@
+"""Razorpay payment endpoints.
+
+Two routes
+──────────
+    POST /api/payment/razorpay/order
+        Create a Razorpay order. The mobile app uses the returned key_id +
+        order_id to open Razorpay Checkout.  A PENDING PaymentTransaction row
+        is written immediately so we have a record even if the user abandons.
+
+    POST /api/payment/razorpay/verify
+        Verify the HMAC-SHA256 signature returned by Checkout. On success:
+          - the PaymentTransaction is marked SUCCEEDED
+          - the user's wallet is credited (paise)
+          - new_balance (rupees) is returned to the caller
+
+Going live checklist
+────────────────────
+    1.  pip install razorpay
+    2.  Set in .env:
+            RAZORPAY_KEY_ID=rzp_live_...
+            RAZORPAY_KEY_SECRET=...
+    3.  From the "Add Money" screen POST to /api/payment/razorpay/order,
+        open Checkout with the returned key_id + order_id, then POST
+        the signed callback to /api/payment/razorpay/verify.
+
+Stub mode
+─────────
+    When RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are absent both endpoints
+    return a deterministic fake response (is_stub=True) so the rest of the
+    app keeps working during development.  Stub responses still write real
+    rows to user_wallets and payment_transactions so the admin panel can
+    display them.
 """
-Razorpay payment endpoints.
 
-Two routes:
-    POST /api/payment/razorpay/order   — create an order on Razorpay, return its id + amount
-    POST /api/payment/razorpay/verify  — verify the signature returned by Razorpay Checkout
-
-These are wired up but the frontend does not call them yet (intentionally
-"don't use in current phase"). When you're ready to go live:
-
-1. `pip install razorpay`
-2. Add to GoCity_backend/.env:
-       RAZORPAY_KEY_ID="rzp_test_..."
-       RAZORPAY_KEY_SECRET="..."
-3. From the Add Money screen, POST to /razorpay/order, open Checkout with the
-   returned key + order_id, then POST the signed result to /razorpay/verify.
-
-If RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are missing, both endpoints return a
-deterministic stub so the rest of the app keeps working in dev.
-"""
-
-import hashlib
-import hmac
-import os
-import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.user.service import get_current_user
 from app.models.user import User
 from app.schemas.payment_schema import (
@@ -37,82 +47,90 @@ from app.schemas.payment_schema import (
     VerifyPaymentRequest,
     VerifyPaymentResponse,
 )
-
+from app.payment import service as payment_service
+from app.payment import repository as payment_repo
 
 router = APIRouter()
 
 
-# ─────────────────────────────────────────────
-# Razorpay client (lazy, optional)
-# ─────────────────────────────────────────────
-def _get_keys() -> tuple[str | None, str | None]:
-    return os.getenv("RAZORPAY_KEY_ID"), os.getenv("RAZORPAY_KEY_SECRET")
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/payment/razorpay/order
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def _get_client():
-    """Lazy-import razorpay SDK. Returns None if package or keys missing."""
-    key_id, key_secret = _get_keys()
-    if not key_id or not key_secret:
-        return None
-    try:
-        import razorpay  # type: ignore
-    except ImportError:
-        return None
-    return razorpay.Client(auth=(key_id, key_secret))
-
-
-def _verify_signature_local(order_id: str, payment_id: str, signature: str, secret: str) -> bool:
-    """Manual HMAC-SHA256 verification — used when the razorpay SDK is not installed."""
-    payload = f"{order_id}|{payment_id}".encode("utf-8")
-    expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
-
-
-# ─────────────────────────────────────────────
-# Routes
-# ─────────────────────────────────────────────
 @router.post("/razorpay/order", response_model=CreateOrderResponse)
 def create_order(
     payload: CreateOrderRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a Razorpay order so the mobile app can launch Checkout."""
-    amount_paise = payload.amount * 100  # Razorpay works in paise
-    key_id, _ = _get_keys()
-    client = _get_client()
+    """Create a Razorpay order and record a PENDING transaction.
 
-    # Stub mode — no real Razorpay call. Lets the frontend integrate against a
-    # predictable response while the merchant account is being set up.
-    if client is None:
+    amount is in *rupees* (integer). Razorpay receives the value in paise
+    internally; the response also returns paise so the frontend doesn't need
+    to convert.
+    """
+    amount_paise = payload.amount * 100
+    stub = payment_service.is_stub_mode()
+
+    # ── Stub mode ────────────────────────────────────────────────────────────
+    if stub:
+        order_id = f"order_stub_{uuid.uuid4().hex[:14]}"
+
+        wallet = payment_repo.get_or_create_wallet(db, current_user.id)
+        payment_repo.create_pending_transaction(
+            db,
+            wallet_id=wallet.id,
+            amount_paise=amount_paise,
+            razorpay_order_id=order_id,
+            currency=payload.currency,
+            description="Wallet top-up (stub)",
+            is_stub=True,
+        )
+        db.commit()
+
         return CreateOrderResponse(
-            order_id=f"order_stub_{uuid.uuid4().hex[:14]}",
+            order_id=order_id,
             amount=amount_paise,
             currency=payload.currency,
-            key_id=key_id or "rzp_test_stub",
+            key_id=settings.razorpay_key_id or "rzp_test_stub",
             is_stub=True,
         )
 
+    # ── Live mode ─────────────────────────────────────────────────────────────
+    receipt = payment_service.build_receipt(current_user.id)
     try:
-        order = client.order.create(
-            {
-                "amount": amount_paise,
-                "currency": payload.currency,
-                "receipt": f"rcpt_{current_user.id}_{int(time.time())}",
-                "payment_capture": 1,
-            }
+        order = payment_service.create_razorpay_order(
+            amount_rupees=payload.amount,
+            currency=payload.currency,
+            receipt=receipt,
         )
-    except Exception as e:  # razorpay.errors.BadRequestError etc.
-        raise HTTPException(status_code=502, detail=f"Razorpay error: {e}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Razorpay error: {exc}")
+
+    wallet = payment_repo.get_or_create_wallet(db, current_user.id)
+    payment_repo.create_pending_transaction(
+        db,
+        wallet_id=wallet.id,
+        amount_paise=amount_paise,
+        razorpay_order_id=order["id"],
+        currency=order["currency"],
+        description="Wallet top-up",
+        is_stub=False,
+    )
+    db.commit()
 
     return CreateOrderResponse(
         order_id=order["id"],
-        amount=order["amount"],
+        amount=order["amount"],   # already in paise from Razorpay
         currency=order["currency"],
-        key_id=key_id,
+        key_id=settings.razorpay_key_id,
         is_stub=False,
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/payment/razorpay/verify
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/razorpay/verify", response_model=VerifyPaymentResponse)
 def verify_payment(
@@ -120,47 +138,48 @@ def verify_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Verify the Checkout callback signature and (later) credit the wallet."""
-    _, key_secret = _get_keys()
+    """Verify the Checkout callback signature and credit the user's wallet.
 
-    # Stub mode: always succeed so the frontend can test the happy path.
-    if not key_secret:
-        return VerifyPaymentResponse(
-            verified=True,
-            credited_amount=payload.amount,
-            new_balance=0,  # wallet model not added yet
-            is_stub=True,
+    Flow:
+        1. Look up the PENDING transaction by razorpay_order_id.
+        2. Verify the HMAC-SHA256 signature (or trust it in stub mode).
+        3. Credit the wallet and mark the transaction SUCCEEDED.
+        4. Return the new balance in rupees.
+
+    A 404 is returned if no matching PENDING transaction exists — this guards
+    against replaying an already-verified order.
+    """
+    stub = payment_service.is_stub_mode()
+
+    # Locate the PENDING transaction written during /order
+    txn = payment_repo.get_transaction_by_order_id(db, payload.razorpay_order_id)
+    if txn is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending transaction found for this order id.",
         )
 
-    client = _get_client()
-    try:
-        if client is not None:
-            client.utility.verify_payment_signature(
-                {
-                    "razorpay_order_id": payload.razorpay_order_id,
-                    "razorpay_payment_id": payload.razorpay_payment_id,
-                    "razorpay_signature": payload.razorpay_signature,
-                }
-            )
-            ok = True
-        else:
-            ok = _verify_signature_local(
-                payload.razorpay_order_id,
-                payload.razorpay_payment_id,
-                payload.razorpay_signature,
-                key_secret,
-            )
-    except Exception:
-        ok = False
+    # ── Signature verification ────────────────────────────────────────────────
+    verified = payment_service.verify_razorpay_signature(
+        order_id=payload.razorpay_order_id,
+        payment_id=payload.razorpay_payment_id,
+        signature=payload.razorpay_signature,
+    )
 
-    if not ok:
-        raise HTTPException(status_code=400, detail="Invalid payment signature")
+    if not verified:
+        payment_repo.mark_transaction_failed(db, txn)
+        raise HTTPException(status_code=400, detail="Invalid payment signature.")
 
-    # TODO: When the wallet model is added, credit `payload.amount` to the
-    # current user's balance here and return the new balance.
+    # ── Credit wallet ─────────────────────────────────────────────────────────
+    wallet = payment_repo.get_or_create_wallet(db, current_user.id)
+    payment_repo.mark_transaction_succeeded(db, txn, payload.razorpay_payment_id)
+    wallet = payment_repo.credit_wallet(db, wallet, txn.amount_paise)
+
+    new_balance_rupees = round(wallet.balance_paise / 100, 2)
+
     return VerifyPaymentResponse(
         verified=True,
-        credited_amount=payload.amount,
-        new_balance=0,
-        is_stub=False,
+        credited_amount=payload.amount,          # rupees, as sent by the client
+        new_balance=new_balance_rupees,
+        is_stub=stub,
     )

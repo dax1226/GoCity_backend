@@ -42,6 +42,9 @@ class User(Base):
     bookings = relationship(
         "Booking", back_populates="user", cascade="all, delete-orphan"
     )
+    wallet = relationship(
+        "UserWallet", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class SavedPlace(Base):

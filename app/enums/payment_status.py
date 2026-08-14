@@ -1,17 +1,23 @@
-"""Payment lifecycle enum.
+"""Payment lifecycle enums.
 
-Placeholder — no payment-status column exists on the Booking or any wallet
-model yet. Razorpay flows in app/payment/router.py currently signal success
-via the boolean `verified` field on the verify response. When a wallet or
-transactions table lands, switch those flows to use this enum.
+PaymentStatus — tracks where a single Razorpay transaction sits in its
+lifecycle.  Used on the PaymentTransaction ORM model.
+
+TransactionType — direction of the ledger entry.  CREDIT increases the
+wallet balance; DEBIT decreases it (ride deduction, refund out, etc.).
 """
 
 import enum
 
 
 class PaymentStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    PROCESSING = "PROCESSING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    REFUNDED = "REFUNDED"
+    PENDING = "PENDING"         # Order created, awaiting Checkout completion
+    PROCESSING = "PROCESSING"   # Checkout done, signature verification in flight
+    SUCCEEDED = "SUCCEEDED"     # Signature verified, wallet credited
+    FAILED = "FAILED"           # Signature mismatch or Razorpay error
+    REFUNDED = "REFUNDED"       # Amount returned to user
+
+
+class TransactionType(str, enum.Enum):
+    CREDIT = "CREDIT"   # Money added to wallet (top-up, refund, incentive)
+    DEBIT = "DEBIT"     # Money removed from wallet (ride payment, penalty)
