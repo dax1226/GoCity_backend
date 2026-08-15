@@ -6,9 +6,12 @@ __pycache__/
 venv/
 env/
 
-# Env / secrets
+# ── Secrets & environment variables ─────────────────────────────────────────
+# NEVER commit these. Add real keys to your platform's secret store (AWS,
+# Railway, Render, etc.) and keep .env.example for documentation only.
 .env
-*.json.local
+.env.*
+!.env.example
 
 # Never commit Firebase service account credentials
 *firebase-adminsdk*.json
@@ -28,7 +31,3 @@ package-lock.json
 .idea/
 .DS_Store
 Thumbs.db
-.env
-__pycache__/
-*.pyc
-gocity.db
